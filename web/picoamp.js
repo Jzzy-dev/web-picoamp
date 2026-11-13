@@ -239,10 +239,10 @@ function js_music_name(out, max) { return music ? writeOut(music.name, out, max)
 // ---------------- the web ----------------
 function js_fetch(id, p, n) {
     const url = str(p, n);
-    fetch(url, { cache: 'no-store' }).then(async r => {
+    fetch(url, { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined }).then(async r => {
         const b = new Uint8Array(await r.arrayBuffer());
         return [r.status, b, ''];
-    }).catch(e => [0, new Uint8Array(0), navigator.onLine === false ? 'No internet connection' : 'No answer (blocked or offline)'])
+    }).catch(e => [0, new Uint8Array(0), navigator.onLine === false ? 'No internet connection' : e && e.name === 'TimeoutError' ? 'No answer in 20 seconds' : 'No answer (blocked or offline)'])
       .then(([status, b, err]) => {
           const [bp, bl] = put(b);
           const [ep] = put(err);
