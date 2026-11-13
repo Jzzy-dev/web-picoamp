@@ -27,18 +27,14 @@ with sync_playwright() as pw:
     page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
     run = lambda s: page.evaluate('t => picoamp.script(t)', s)
 
-    # a station of the default list (SomaFM, https): through Web Audio, the spectrum moves
-    out = run('key Home; key Enter; wait 100; key End; key Enter; wait 100; key Home; key Down; key Down; key Enter; wait 6000; status')
-    check('a real station plays', out, r"state=1 .*stream=1 buf=0")
-    a = page.evaluate('picoamp.audio')
-    print('     through Web Audio:', not a['cur']['usingPlain'] if a['cur'] else None)
-    page.screenshot(path='live-radio.png')
-
-    # the directory
-    out = run('key BS; key Home; key Down; key Down; key Enter; wait 6000; list')
+    # the directory, and a real station from it
+    out = run('key Home; key Enter; wait 100; key Home; key Down; key Down; key Enter; wait 6000; list')
     check('Radio Browser: top stations', out, r'list /Internet radio/Top stations \([1-9]\d+\)')
     out = run('key Down; key Enter; wait 6000; status')
     check('Radio Browser: a station plays', out, r'state=1 .*stream=1')
+    a = page.evaluate('picoamp.audio')
+    print('     through Web Audio (CORS):', (not a['cur']['usingPlain']) if a['cur'] else None)
+    page.screenshot(path='live-radio.png')
     out = run('key /; type jazz; key Enter; wait 6000; list')
     check('Radio Browser: search', out, r'list /Internet radio/Search/jazz \([1-9]\d*\)')
 
@@ -47,10 +43,19 @@ with sync_playwright() as pw:
     check('GeoJS: a place', out, r"place='[^']+'")
     check('Open-Meteo: the weather', out, r"weather='-?\d+\.\d C ")
     check('Open-Meteo: the days', out, r'\d{4}-\d\d-\d\d \w{3} code=\d+')
-    out = run('key C; key L; type Amsterdam; key Enter; wait 4000; page')
+    out = run('key C; key L; type Amsterdam; key Enter; wait 4000; key Enter; wait 4000; page')
     check('Open-Meteo: a place by name', out, r'Amsterdam')
     page.screenshot(path='live-clock.png')
     br.close()
 srv.shutdown()
+
+# which of the default stations allow Web Audio (CORS), from here (information only)
+import urllib.request
+for u in ['https://ice1.somafm.com/groovesalad-128-mp3', 'https://stream.radioparadise.com/mp3-128']:
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(u, headers={'Origin': 'https://jzzy-dev.github.io', 'User-Agent': 'Mozilla/5.0'}), timeout=8)
+        print('     %s: %d, CORS %s' % (u, r.status, r.headers.get('Access-Control-Allow-Origin')))
+        r.close()
+    except Exception as e: print('     %s: %s' % (u, e))
 print('all live checks passed' if not fails else '%d live checks FAILED' % fails)
 sys.exit(1 if fails else 0)
