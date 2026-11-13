@@ -1,0 +1,63 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "wasi-sdk 25"
+        run: |
+          curl -sSL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sdk-25.0-x86_64-linux.tar.gz | tar xz -C /opt
+          mv /opt/wasi-sdk-25.0-x86_64-linux /opt/wasi-sdk
+
+      - name: Build
+        run: make WASI_SDK=/opt/wasi-sdk
+
+      - name: "Test tools: ffmpeg, Playwright with Chromium"
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          pip install playwright
+          python3 -m playwright install --with-deps chromium
+
+      - name: "Tests in headless Chromium"
+        run: python3 tests/run_web.py --shots shots
+
+      - name: "Live checks: Radio Browser, GeoJS, Open-Meteo, a real station"
+        continue-on-error: true
+        run: python3 tests/live_web.py && mv live-*.png shots/
+
+      - name: Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots
+
+      - name: The page
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  # GitHub Pages: Settings -> Pages -> Source: GitHub Actions
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

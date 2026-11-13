@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PicoAmp</title>
+<meta name="description" content="PICOAMP, the MSX2 music player of the PicoVerse cartridge, in the browser: internet radio, your own music, equalizer, clock and weather.">
+<meta name="theme-color" content="#000049">
+<link rel="icon" href="icon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="screen" tabindex="0" aria-label="PicoAmp: the player. Press H for the keys."></canvas>
+<p id="hint">Press a key or click to start &middot; H: the keys &middot; F11: full screen</p>
+<p id="fail" hidden>PicoAmp needs a browser with WebAssembly (a recent Chrome, Edge, Firefox or Safari).</p>
+<dialog id="lists">
+  <form method="dialog" onsubmit="return false">
+    <h2>Station lists</h2>
+    <p class="note">Every list is a folder under Internet radio. Edit the text: <code>#EXTINF:-1,Name</code> and then the stream's address on the next line.</p>
+    <div class="row">
+      <select id="lists-select" aria-label="List"></select>
+      <input id="lists-name" aria-label="Name of the list" spellcheck="false">
+      <button type="button" id="lists-rename">Rename</button>
+    </div>
+    <textarea id="lists-text" spellcheck="false" aria-label="The list's stations"></textarea>
+    <div class="row">
+      <button type="button" id="lists-new">New list</button>
+      <button type="button" id="lists-import">Import .m3u / .pls&hellip;</button>
+      <button type="button" id="lists-export">Export</button>
+      <button type="button" id="lists-delete">Delete</button>
+      <span class="grow"></span>
+      <button type="button" id="lists-close" class="main">Done</button>
+    </div>
+  </form>
+</dialog>
+<script src="picoamp.js"></script>
+</body>
+</html>

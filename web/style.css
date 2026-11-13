@@ -1,0 +1,25 @@
+/* PicoAmp for the web: the picture fills the window; the rest is the MSX's navy */
+html, body { margin: 0; height: 100%; background: #000049; overflow: hidden; }
+body { font: 14px/1.4 system-ui, sans-serif; color: #dadada; }
+#screen { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; outline: none; touch-action: none; image-rendering: auto; }
+#hint, #fail { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: 6px 10px; text-align: center;
+  background: rgba(0, 0, 36, .85); color: #b6b6ff; font-size: 13px; pointer-events: none; transition: opacity .4s; }
+#hint[hidden], #fail[hidden] { display: none; }
+body:not(.ready) #hint { display: none; }
+#fail { top: 40%; bottom: auto; color: #ff6d6d; }
+
+dialog { background: #000049; color: #fff; border: 2px solid #4949b6; border-radius: 0; padding: 14px 16px; width: min(720px, 92vw); }
+dialog::backdrop { background: rgba(0, 0, 0, .6); }
+dialog h2 { margin: 0 0 6px; font-size: 16px; letter-spacing: .08em; text-transform: uppercase; color: #ffff24; }
+dialog .note { margin: 0 0 10px; color: #b6b6b6; font-size: 13px; }
+dialog code { color: #6dffff; }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.grow { flex: 1; }
+select, input, textarea, button { font: inherit; color: #fff; background: #000092; border: 1px solid #4949b6; border-radius: 0; padding: 4px 8px; }
+select { min-width: 12em; }
+input { flex: 1; min-width: 8em; }
+textarea { width: 100%; box-sizing: border-box; height: 45vh; font: 13px/1.35 ui-monospace, Consolas, monospace; resize: vertical; }
+button { cursor: pointer; }
+button:hover, button:focus-visible { background: #2424db; }
+button.main { background: #24b624; border-color: #6dff6d; color: #000; }
+:focus-visible { outline: 2px solid #ffff24; outline-offset: 1px; }
