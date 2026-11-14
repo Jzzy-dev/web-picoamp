@@ -1,7 +1,8 @@
-// fullscreen.c - Z: three pictures made of the spectrum and the levels, as
-// PICOAMP's full screen: Bars (24 bars of 20 cells, 40 steps, with peaks),
-// Mirror (the bars from the middle up and their reflection down), Plasma (four
-// sines, its 12 colours turning faster when the music is louder).
+// fullscreen.c - Z: four pictures, as PICOAMP's full screen: Bars (24 bars of
+// 20 cells, 40 steps, with peaks), Mirror (the bars from the middle up and
+// their reflection down), Plasma (four sines, its 12 colours turning faster
+// when the music is louder), Cover (the cover twice as big, its palette for
+// the whole screen).
 // Row 0 what plays; row 23 the picture's name and the time.
 #include <stdio.h>
 #include <string.h>
@@ -10,9 +11,11 @@
 #include "gfx.h"
 #include "ui.h"
 #include "sys.h"
+#include "cover.h"
+#include "pva_cover.h"
 
-enum { FS_BARS, FS_MIRROR, FS_PLASMA, FS_N };
-static const char *const fs_names[FS_N] = { "BARS", "MIRROR", "PLASMA" };
+enum { FS_BARS, FS_MIRROR, FS_PLASMA, FS_COVER, FS_N };
+static const char *const fs_names[FS_N] = { "BARS", "MIRROR", "PLASMA", "COVER" };
 static int fs_mode;
 
 static const uint8_t fs_segof[32] = { 0,1,3,4,5,6,8,9,10,12,13,14,15,17,18,19,21,22,23,25,26,27,28,30,31,32,34,35,36,37,39,40 };
@@ -139,19 +142,44 @@ static void fs_open(void)
     pl_phase = -1;
 }
 
+// the cover: 160 x 160 pixels (each of its pixels doubled), rows 1-20, columns 6-25
+static void draw_cover2(void)
+{
+    ui_cover_follow();
+    const uint8_t *c = cover_data();
+    if (!c) { gfx_band(0, 0, NULL); gfx_str(10, 12, "NO COVER", 8, COL(GREY, NAVY)); return; }
+    const uint8_t *pat = c + PVA_COVER_PAL_SIZE, *col = pat + PVA_COVER_PAT_SIZE;
+    for (int cy = 0; cy < PVA_COVER_CELLS; cy++)
+        for (int cx = 0; cx < PVA_COVER_CELLS; cx++)
+            for (int r = 0; r < 8; r++)
+            {
+                int cell = cy * PVA_COVER_CELLS + cx;
+                uint8_t p = pat[cell * 8 + r], fg = col[cell * 8 + r] >> 4, bg = col[cell * 8 + r] & 15;
+                for (int x = 0; x < 8; x++)
+                {
+                    uint8_t v = (p & (0x80 >> x)) ? fg : bg;
+                    int px = 48 + (cx * 8 + x) * 2, py = 8 + (cy * 8 + r) * 2;
+                    gfx_fb[py][px] = gfx_fb[py][px + 1] = gfx_fb[py + 1][px] = gfx_fb[py + 1][px + 1] = v;
+                }
+            }
+    gfx_band(0, 192, c);                   // (the whole screen: its text is in the entries the cover keeps)
+}
+
 static void fs_set(int m)
 {
     fs_mode = (m + FS_N) % FS_N;
+    gfx_band(0, 0, NULL);
     gfx_reset_palette();
     pl_phase = -1;
 }
 
-static void fs_close(void) { gfx_reset_palette(); }
+static void fs_close(void) { gfx_band(0, 0, NULL); gfx_reset_palette(); }
 
 static void fs_frame(void)
 {
     gfx_clear(NAVY);
     if (fs_mode == FS_PLASMA) draw_plasma();
+    else if (fs_mode == FS_COVER) draw_cover2();
     else draw_bars(fs_mode == FS_MIRROR);
     gfx_fill(0, 0, 32, COL(WHITE, NAVY));
     ui_row0(0, 0, 32, COL(WHITE, NAVY));

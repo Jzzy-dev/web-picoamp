@@ -45,7 +45,7 @@ log = open(os.path.join(T, 'svc.log'), 'w')
 svc = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tests', 'web_server.py'), str(SVC_PORT), os.path.join(M, '01 Sine.mp3'), M], stdout=log, stderr=log)
 time.sleep(0.6)
 
-URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi&logoproxy=%s/proxy%%3Furl%%3D' % (PAGE_PORT, SVC, SVC, SVC, SVC, SVC)
+URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi&logoproxy=%s/proxy%%3Furl%%3D&itunes=%s/itunes' % (PAGE_PORT, SVC, SVC, SVC, SVC, SVC, SVC)
 fails = 0
 def check(name, out, pattern):
     global fails
@@ -147,6 +147,20 @@ try:
       else: print('ok   the tag cover is red')
       out = run('key V; page; key BS')
       check('cover: V goes on to the spectrum', out, r'^page 0$')
+      # a file without a picture: a default one, then its cover online (iTunes, by artist and title)
+      out = run('key Home; key Down; key Down; key Enter; wait 500; key V; key V; wait 2000; page')
+      check('cover: no picture: a default one, then online', out, r'page 0 cover=ready')
+      run('wait 2500')
+      check('cover: iTunes asked (artist and title)', open(os.path.join(T, 'svc.log')).read(), r'itunes Unit Tester Sine Caf')
+      px = page.evaluate('picoamp.pixel(48, 88)')
+      if not (px[1] > px[0] + 60 and px[1] > px[2] + 60): fails += 1; print('FAIL the online cover is not green: %s' % px)
+      else: print('ok   the online cover (green)')
+      out = run('key Z; key Left; wait 400; page')
+      shot('fullcover')
+      px = page.evaluate('picoamp.pixel(128, 96)')
+      if not (px[1] > px[0] + 60 and px[1] > px[2] + 60): fails += 1; print('FAIL the full-screen cover is not green: %s' % px)
+      else: print('ok   the full-screen cover')
+      run('key Z; key V')
 
       # the radio: a station with CORS (Web Audio), one without (as it is), one that is gone
       lists = {'Test.m3u': '#EXTM3U\r\n#EXTINF:-1,Local FM\r\n%s/stream.mp3\r\n#EXTINF:-1,No CORS FM\r\n%s/nocors.mp3\r\n#EXTINF:-1,Gone FM\r\n%s/dead.mp3\r\n' % (SVC, SVC, SVC)}
@@ -253,7 +267,7 @@ try:
       if open(os.path.join(T, 'svc.log')).read().count('byuuid uuid-1') != n1: fails += 1; print('FAIL logo: asked again')
       else: print('ok   logo: not asked again')
       out = run('key Up; key Enter; wait 2000; page; key V')
-      check('logo: a station without one', out, r'page 0 cover=none')
+      check('logo: a station without one: a default picture', out, r'page 0 cover=ready')
 
       # the clock (place by IP, by name; sleep timer; alarm) and the weather
       out = run('key C; wait 1500; page')

@@ -72,6 +72,17 @@ class H(http.server.BaseHTTPRequestHandler):
         elif p == '/proxy':
             print("proxy", q.get('url'), flush=True)
             self.reply(open(os.path.join(os.path.dirname(MUSIC), 'logo.png'), 'rb').read(), 'image/png')
+        elif p == '/itunes/search':
+            t, cb = q.get('term', ''), q.get('callback', '')
+            print("itunes", t, flush=True)
+            j = {"resultCount": 0, "results": []}
+            if t.startswith('Unit Tester'):
+                j = {"resultCount": 1, "results": [{"artistName": "Unit Tester", "artworkUrl100": "http://127.0.0.1:%d/art/100x100bb.jpg" % PORT}]}
+            body = json.dumps(j)
+            self.reply('%s(%s);' % (cb, body) if cb else body, 'text/javascript')
+        elif p.startswith('/art/'):
+            print("art", p, flush=True)
+            self.reply(open(os.path.join(os.path.dirname(MUSIC), 'logo.png'), 'rb').read(), 'image/png')
         elif p.startswith('/json/url/'):
             clicks.append(p[10:])
             print("click", p[10:], flush=True)

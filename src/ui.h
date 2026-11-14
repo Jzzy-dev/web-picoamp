@@ -24,6 +24,7 @@ void ui_message(const char *text, bool error);
 bool ui_quit_requested(void);
 void ui_save_state(void);
 void ui_logo(const uint8_t *data, size_t len);   // the page: the logo of the station that plays (len 0: none)
+void ui_song(const uint8_t *data, size_t len);   // the page: the cover of the song (or album) asked for (len 0: none)
 void ui_reload(void);                     // the place again (its lists were changed)                 // into cfg before it is saved
 // for the scripts: the list (path, entries) or what the page shows, as text (malloc'd)
 char *ui_describe(bool the_list);

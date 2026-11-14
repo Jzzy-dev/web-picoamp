@@ -24,6 +24,9 @@ JS(js_fs_list)      int    js_fs_list(const char *dir, int n, char *out, int max
 // a station's logo (Radio Browser's favicon, kept in the browser's cache): the
 // answer comes in web_logo(bytes) (len 0: none)
 JS(js_station_logo) void   js_station_logo(const char *url, int un, const char *uuid, int uun, const char *name, int nn, const char *rb, int rn);
+// a song's (or an album's) cover (the iTunes search, kept in the browser's cache): the answer
+// comes in web_song(bytes) (len 0: none)
+JS(js_song_cover) void     js_song_cover(const char *artist, int an, const char *what, int wn, int album);
 
 // the web: fetch url; the answer comes in net_done(id, ...)
 JS(js_fetch)        void   js_fetch(int id, const char *url, int n);

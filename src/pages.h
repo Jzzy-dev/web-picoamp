@@ -31,6 +31,7 @@ void ui_row0(int row, int col, int width, uint8_t colour);   // what plays: a ti
 const char *ui_now_playing(void);        // "title - artist  . station"
 void ui_note(const char *text, bool error);                  // a message on the page
 const char *ui_note_text(void);          // the message now ("" when none)
+void ui_cover_follow(void);              // the cover of what plays (asked for, taken when it comes)
 bool ui_note_error(void);
 void ui_eq_next(void);                   // E
 

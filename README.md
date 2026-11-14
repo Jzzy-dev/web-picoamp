@@ -39,6 +39,11 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
   servers do not let other pages read their pictures (CORS), and a page on https cannot fetch from
   http. Those logos come through the public image proxy [wsrv.nl](https://wsrv.nl/), which gets the
   logo's address and nothing else.
+  The song that plays on a station, and a file without a picture (by its tags: artist and album,
+  else artist and title), get their cover from the iTunes search, kept in the browser's cache too.
+  A song's cover shows over the station's logo; a song without one shows the logo again. When
+  nothing has a cover, one of three default pictures shows (Copacabana, New York, Amsterdam), a new
+  one at random for each track or station.
 * **Clock (C)** with sleep timer and alarm, and **Weather (W)** for the place of your internet connection
   ([GeoJS](https://www.geojs.io)) or a place found by name, from [Open-Meteo](https://open-meteo.com).
   * The alarm and sleep timer only work while the page is open (in a background tab is fine).

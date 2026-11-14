@@ -351,6 +351,58 @@ function js_station_logo(up, un, ip, inn, np, nn, rp, rn) {
     })();
 }
 
+// a song's (or an album's) cover, as the MSX engine 0.16 finds it: the iTunes search (as JSONP:
+// it allows no other page to read it otherwise), its "artworkUrl100" (as 300 x 300; straight, or
+// through the image proxy), kept in the browser's cache ("none" too); the bytes go to web_song
+const itunesBase = params.get('itunes') || 'https://itunes.apple.com';
+let songTok = 0, jsonpN = 0;
+function itunes(term, album) {
+    return new Promise(res => {
+        const cb = 'picoampItunes' + (++jsonpN), sc = document.createElement('script');
+        let over = false;
+        const end = v => { if (over) return; over = true; delete window[cb]; sc.remove(); res(v); };
+        window[cb] = j => end(j);
+        sc.onerror = () => end(null);
+        setTimeout(() => end(null), 10000);
+        sc.src = itunesBase + '/search?term=' + encodeURIComponent(term) + '&media=music&entity=' + (album ? 'album' : 'song') + '&limit=1&callback=' + cb;
+        document.head.appendChild(sc);
+    });
+}
+function js_song_cover(ap, an, wp, wn, album) {
+    const term = str(ap, an) + ' ' + str(wp, wn);
+    const tok = ++songTok;
+    const done = b => {
+        if (tok !== songTok) return;
+        const [p, n] = b ? put(b) : [0, 0];
+        try { X.web_song(p, n); } finally { if (p) X.web_free(p); }
+    };
+    (async () => {
+        const key = location.origin + '/picoamp-cover/' + encodeURIComponent(term.toLowerCase());
+        let cache = null;
+        try {
+            cache = await caches.open('picoamp-logos');
+            const hit = await cache.match(key);
+            if (hit) { done(hit.headers.get('x-none') ? null : new Uint8Array(await hit.arrayBuffer())); return; }
+        } catch { cache = null; }
+        const j = await itunes(term, album);
+        if (tok !== songTok) return;
+        let art = (j && Array.isArray(j.results) && j.results[0] && j.results[0].artworkUrl100) || '';
+        art = art.replace('100x100bb', '300x300bb');
+        let img = null, known = !!j;
+        if (art) {
+            img = await getBytes(art);
+            if (!img || !isPicture(img)) img = logoProxy ? await getBytes(logoProxy + encodeURIComponent(art)) : null;
+            if (img && !isPicture(img)) img = null;
+            else if (!img) known = false;
+        }
+        if (tok !== songTok) return;
+        if (cache && known) {
+            try { await cache.put(key, img ? new Response(img) : new Response('', { headers: { 'x-none': '1' } })); } catch { }
+        }
+        done(img);
+    })();
+}
+
 // ---------------- the web ----------------
 function js_fetch(id, p, n) {
     const url = str(p, n);
@@ -833,7 +885,7 @@ async function start() {
             js_fs_list: (p, n, out, max) => { const l = fsList(str(p, n)); return l === null ? -1 : writeOut(l.join('\n'), out, max); },
             js_fetch, js_music_pick, js_music_list, js_music_name,
             js_audio_play, js_audio_pause, js_audio_stop, js_audio_seek, js_audio_gain, js_audio_eq, js_audio_meta,
-            js_can_play, js_open_lists, js_fullscreen: toggleFullscreen, js_decode_image, js_station_logo,
+            js_can_play, js_open_lists, js_fullscreen: toggleFullscreen, js_decode_image, js_station_logo, js_song_cover,
             js_geolocate: () => { },
         },
     };
