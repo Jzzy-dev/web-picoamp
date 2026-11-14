@@ -236,6 +236,58 @@ function js_music_list(id, p, n) {
 
 function js_music_name(out, max) { return music ? writeOut(music.name, out, max) : 0; }
 
+// ---------------- covers ----------------
+// an image in the track's folder (as the MSX engine looks): cover, folder, front, album, albumart,
+// AlbumArtSmall (.jpg, .jpeg, .png); its bytes to the program
+const coverNames = ['cover', 'folder', 'front', 'album', 'albumart', 'albumartsmall'];
+async function folderCover(src, g) {
+    if (!src.startsWith('music:')) return;
+    const rel = src.slice(6), sl = rel.lastIndexOf('/');
+    const dir = sl < 0 ? '' : rel.slice(0, sl);
+    try {
+        const items = await (await musicDir(dir)).list();
+        let best = null, rank = 99;
+        for (const [k, nm] of items) {
+            const m = k === 'f' && nm.toLowerCase().match(/^(.*)\.(jpe?g|png)$/);
+            const i = m ? coverNames.indexOf(m[1]) : -1;
+            if (i >= 0 && i < rank) { rank = i; best = nm; }
+        }
+        if (!best || g !== gen) return;
+        const f = await musicFile('music:' + (dir ? dir + '/' : '') + best);
+        const b = new Uint8Array(await f.arrayBuffer());
+        if (g !== gen) return;
+        const [p, n] = put(b);
+        try { X.web_cover_bytes(p, n); } finally { X.web_free(p); }
+    } catch { }
+}
+
+// a picture the program's JPEG decoder cannot read (PNG, progressive JPEG ...): the browser's,
+// made at most 320 pixels big; the RGB rows back to the program
+function js_decode_image(p, n) {
+    const bytes = u8().slice(p, p + n);
+    const g = gen;
+    if (!window.createImageBitmap) return 0;
+    createImageBitmap(new Blob([bytes])).then(bm => {
+        if (g !== gen) return;
+        const k = Math.min(1, 320 / Math.max(bm.width, bm.height));
+        const w = Math.max(1, Math.round(bm.width * k)), h = Math.max(1, Math.round(bm.height * k));
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const cx = c.getContext('2d');
+        cx.drawImage(bm, 0, 0, w, h);
+        const d = cx.getImageData(0, 0, w, h).data;
+        const rgb = new Uint8Array(w * h * 3);
+        for (let i = 0, j = 0; i < d.length; i += 4, j += 3) {
+            // (transparent: on the player's navy)
+            const a = d[i + 3] / 255;
+            rgb[j] = d[i] * a; rgb[j + 1] = d[i + 1] * a; rgb[j + 2] = d[i + 2] * a + 73 * (1 - a);
+        }
+        const [q] = put(rgb);
+        try { X.web_cover_rgb(w, h, q); } finally { X.web_free(q); }
+    }).catch(() => { });
+    return 1;
+}
+
 // ---------------- the web ----------------
 function js_fetch(id, p, n) {
     const url = str(p, n);
@@ -344,7 +396,9 @@ function js_audio_play(p, n, isFile) {
             const all = new Uint8Array(head.length + tail.length);
             all.set(head); all.set(tail, head.length);
             const [bp, bl] = put(all);
-            try { X.web_tags(bp, bl); } finally { X.web_free(bp); }
+            let pic = 0;
+            try { pic = X.web_tags(bp, bl); } finally { X.web_free(bp); }
+            if (!pic && g === gen) folderCover(src, g);
         }).catch(e => { if (g === gen) cErr(String(e.message || e)); });
         return;
     }
@@ -483,11 +537,18 @@ function draw() {
         small.width = w; small.height = h;
     }
     const px = new Uint32Array(img.data.buffer);
-    const lut = new Uint32Array(16);
-    for (let i = 0; i < 16; i++) { const c = pal[i]; lut[i] = 0xFF000000 | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16 & 0xFF); }
+    const lut = new Uint32Array(16), blut = new Uint32Array(16);
+    const bpal = new Uint32Array(mem.buffer, X.web_band_palette(), 16);
+    for (let i = 0; i < 16; i++) {
+        const c = pal[i], b = bpal[i];
+        lut[i] = 0xFF000000 | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16 & 0xFF);
+        blut[i] = 0xFF000000 | (b & 0xFF) << 16 | (b & 0xFF00) | (b >> 16 & 0xFF);
+    }
+    // (the cover view: its lines in the cover's palette, as the MSX's line interrupt)
+    const by0 = X.web_band_y0(), by1 = X.web_band_y1();
     for (let y = 0; y < h; y++) {
-        const r = y * stride, o = y * w;
-        for (let x = 0; x < w; x++) px[o + x] = lut[fb[r + x] & 15];
+        const r = y * stride, o = y * w, l = y >= by0 && y < by1 ? blut : lut;
+        for (let x = 0; x < w; x++) px[o + x] = l[fb[r + x] & 15];
     }
     sctx.putImageData(img, 0, 0);
 
@@ -670,8 +731,13 @@ window.picoamp = {
     fs: { get: fsGet, set: fsSet, list: fsList },
     key: k => X.web_key(k),
     save: () => X.web_save(),
-    stopSaving() { saving = false; },
-    hideHint,     // (the tests: the settings are changed under it)
+    stopSaving() { saving = false; },     // (the tests: the settings are changed under it)
+    hideHint,
+    // (the tests: the colour on the screen at a pixel of the picture, 256 x 192)
+    pixel(x, y) {
+        const cx = Math.floor(dest.x + (x + 0.5) * dest.w / 256), cy = Math.floor(dest.y + (y + 0.5) * dest.h / 192);
+        return Array.from(g2.getImageData(cx, cy, 1, 1).data.slice(0, 3));
+    },
     get audio() { return { cur, paused: el.paused, plainPaused: plain.paused, gainL, gainR, eqGains, ctx: ctx && ctx.state }; },
 };
 
@@ -704,7 +770,7 @@ async function start() {
             js_fs_list: (p, n, out, max) => { const l = fsList(str(p, n)); return l === null ? -1 : writeOut(l.join('\n'), out, max); },
             js_fetch, js_music_pick, js_music_list, js_music_name,
             js_audio_play, js_audio_pause, js_audio_stop, js_audio_seek, js_audio_gain, js_audio_eq, js_audio_meta,
-            js_can_play, js_open_lists, js_fullscreen: toggleFullscreen,
+            js_can_play, js_open_lists, js_fullscreen: toggleFullscreen, js_decode_image,
             js_geolocate: () => { },
         },
     };

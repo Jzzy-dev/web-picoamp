@@ -5,6 +5,9 @@
 
 uint8_t  gfx_fb[GFX_MAXH][GFX_MAXW];
 uint32_t gfx_pal[16];
+uint32_t gfx_pal_base[16];
+uint32_t gfx_band_pal[16];
+int      gfx_band_y0, gfx_band_y1;
 int      gfx_w = GFX_W, gfx_h = GFX_H;
 
 void gfx_set_size(int w, int h)
@@ -34,6 +37,19 @@ void gfx_reset_palette(void)
 {
     for (int i = 0; i < 16; i++)
         gfx_set_rgb(i, (palette[2 * i] >> 4) & 7, palette[2 * i + 1] & 7, palette[2 * i] & 7);
+    memcpy(gfx_pal_base, gfx_pal, sizeof gfx_pal_base);
+}
+
+void gfx_band(int y0, int y1, const uint8_t *msx_pal)
+{
+    if (!msx_pal || y1 <= y0) { gfx_band_y0 = gfx_band_y1 = 0; return; }
+    for (int i = 0; i < 16; i++)
+    {
+        int r = msx_pal[2 * i] >> 4 & 7, g = msx_pal[2 * i + 1] & 7, b = msx_pal[2 * i] & 7;
+        gfx_band_pal[i] = ((unsigned)(r * 255 / 7) << 16) | ((unsigned)(g * 255 / 7) << 8) | (unsigned)(b * 255 / 7);
+    }
+    gfx_band_y0 = y0;
+    gfx_band_y1 = y1;
 }
 
 void gfx_init(void)
@@ -252,5 +268,8 @@ int gfx_to_msx(const char *s, uint8_t *out, int max)
 void gfx_to_rgb(uint32_t *out)
 {
     for (int y = 0; y < gfx_h; y++)
-        for (int x = 0; x < gfx_w; x++) *out++ = gfx_pal[gfx_fb[y][x]];
+    {
+        const uint32_t *pal = y >= gfx_band_y0 && y < gfx_band_y1 ? gfx_band_pal : gfx_pal;
+        for (int x = 0; x < gfx_w; x++) *out++ = pal[gfx_fb[y][x]];
+    }
 }

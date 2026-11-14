@@ -39,6 +39,9 @@ JS(js_audio_eq)     void   js_audio_eq(int g0, int g1, int g2, int g3, int g4);
 JS(js_audio_meta)   void   js_audio_meta(const char *title, int tn, const char *artist, int an, const char *album, int bn);
 JS(js_can_play)     int    js_can_play(const char *codec, int n);       // the browser plays it
 
+// covers: a picture TJpgDec cannot read (PNG ...): the browser decodes it; it comes in web_cover_rgb
+JS(js_decode_image) int    js_decode_image(const void *data, int len);
+
 // the page
 JS(js_open_lists)   void   js_open_lists(void);          // the station lists' editor
 JS(js_fullscreen)   void   js_fullscreen(void);

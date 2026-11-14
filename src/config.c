@@ -68,7 +68,7 @@ void config_load(void)
             }
         }
         else if (!u_stricmp(k, "balance")) { cfg.balance = atoi(v); if (cfg.balance < 0 || cfg.balance > 100) cfg.balance = 50; }
-        else if (!u_stricmp(k, "view")) cfg.view = !u_stricmp(v, "scope") ? 1 : 0;
+        else if (!u_stricmp(k, "view")) cfg.view = !u_stricmp(v, "scope") ? 1 : !u_stricmp(v, "cover") ? 2 : 0;
         else if (!u_stricmp(k, "music")) { if (*v) u_copy(cfg.music_dir, sizeof cfg.music_dir, v); }
         else if (!u_stricmp(k, "folder")) u_copy(cfg.start_path, sizeof cfg.start_path, v);
         else if (!u_stricmp(k, "window_x")) cfg.win_x = atoi(v);
@@ -145,7 +145,7 @@ void config_save(void)
         "sort = %s\r\n",
         cfg.volume, (cfg.mode & 1) ? "yes" : "no", (cfg.mode & 2) ? "yes" : "no",
         cfg.eq[0], cfg.eq[1], cfg.eq[2], cfg.eq[3], cfg.eq[4], cfg.balance,
-        cfg.view ? "scope" : "spectrum", cfg.music_dir, cfg.start_path,
+        cfg.view == 1 ? "scope" : cfg.view == 2 ? "cover" : "spectrum", cfg.music_dir, cfg.start_path,
         cfg.win_x, cfg.win_y, cfg.win_w, cfg.win_h,
         cfg.maximized ? "yes" : "no", cfg.fullscreen ? "yes" : "no",
         scale_names[cfg.scale % 3], cfg.scanlines ? "yes" : "no", cfg.on_top ? "yes" : "no",

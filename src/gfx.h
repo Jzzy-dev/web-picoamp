@@ -21,6 +21,11 @@ enum {
 
 extern uint8_t gfx_fb[GFX_MAXH][GFX_MAXW];  // palette indices
 extern uint32_t gfx_pal[16];               // 0x00RRGGBB
+extern uint32_t gfx_pal_base[16];          // PICOAMP's own (gfx_pal can turn: the plasma)
+// a band of lines with a palette of its own (the cover view: the MSX switches it with a line interrupt)
+extern uint32_t gfx_band_pal[16];
+extern int      gfx_band_y0, gfx_band_y1;  // lines y0 .. y1 - 1 (y1 0: none)
+void gfx_band(int y0, int y1, const uint8_t *msx_pal);  // msx_pal: 16 x 0RRR0BBB, 00000GGG; NULL: none
 extern int gfx_w, gfx_h;                   // the picture's size now (shown 4:3)
 
 void gfx_set_size(int w, int h);           // 256 x 192 or 512 x 212

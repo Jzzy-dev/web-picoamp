@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ui.h"
+#include "cover.h"
+#include "pva_cover.h"
 #include "gfx.h"
 #include "audio.h"
 #include "viz.h"
@@ -56,6 +58,7 @@ static const uint8_t icons[7][8] = {
 // level 0..31 -> lit segments 0..20
 static const uint8_t seg_of[32] = { 0,1,1,2,3,3,4,5,5,6,6,7,8,8,9,10,10,11,12,12,13,14,14,15,15,16,17,17,18,19,19,20 };
 static const uint8_t label_bars[] = { 0, 6, 12, 17, 21 };
+static const uint8_t label_cover[] = { 0, 8, 16 };     // the cover view's: under its bars 0, 4, 8
 
 typedef struct
 {
@@ -482,13 +485,59 @@ static void draw_scope(void)
     }
 }
 
-static void freq_label(int bar)
+static void freq_label_at(int band, int col)
 {
     char b[8];
-    unsigned hz = viz.freq[bar];
+    unsigned hz = viz.freq[band];
     if (hz < 1000) snprintf(b, sizeof b, "%u", hz);
     else snprintf(b, sizeof b, "%uK", (hz + 500) / 1000);
-    gfx_str(16, bar + 1, b, 3, COL(CYAN, NAVY));
+    gfx_str(16, col, b, 3, COL(CYAN, NAVY));
+}
+
+static void freq_label(int bar) { freq_label_at(bar, bar + 1); }
+
+// ---------------- the cover view (V a third time) ----------------
+// as on the MSX: the cover in columns 1-10 (80 x 80, SCREEN 4 cells with five
+// palette entries of its own: those lines get the cover's palette), 12 bars
+// beside it, each the louder of two bands
+static char     cover_for[2048];        // the track the cover was asked for
+static bool     cover_asked;
+
+static void cover_follow(void)
+{
+    if (st.stream || (st.state == ST_STOPPED && !st.url[0])) { cover_none(); cover_asked = false; cover_for[0] = 0; return; }
+    if (cover_asked && !strcmp(cover_for, st.url)) return;
+    u_copy(cover_for, sizeof cover_for, st.url);
+    cover_asked = true;
+    cover_track(st.url);
+}
+
+static void draw_cover(void)
+{
+    cover_follow();
+    const uint8_t *c = cover_data();
+    if (c)
+    {
+        const uint8_t *pat = c + PVA_COVER_PAL_SIZE, *col = pat + PVA_COVER_PAT_SIZE;
+        for (int cy = 0; cy < PVA_COVER_CELLS; cy++)
+            for (int cx = 0; cx < PVA_COVER_CELLS; cx++)
+                for (int r = 0; r < 8; r++)
+                {
+                    int cell = cy * PVA_COVER_CELLS + cx;
+                    uint8_t p = pat[cell * 8 + r], fg = col[cell * 8 + r] >> 4, bg = col[cell * 8 + r] & 15;
+                    uint8_t *d = &gfx_fb[48 + cy * 8 + r][8 + cx * 8];
+                    for (int x = 0; x < 8; x++) d[x] = (p & (0x80 >> x)) ? fg : bg;
+                }
+        gfx_band(48, 128, c);
+    }
+    else if (cover_state() != COVER_MAKING) gfx_str(10, 2, "NO COVER", 8, COL(GREY, NAVY));
+    for (int k = 0; k < 12; k++)
+    {
+        int l = viz.level[2 * k] > viz.level[2 * k + 1] ? viz.level[2 * k] : viz.level[2 * k + 1];
+        int p = viz.peak[2 * k] > viz.peak[2 * k + 1] ? viz.peak[2 * k] : viz.peak[2 * k + 1];
+        draw_bar(12 + k, l, p);
+    }
+    for (unsigned i = 0; i < sizeof label_cover; i++) freq_label_at(label_cover[i], 12 + (int)i * 4);
 }
 
 // ---------------- the equalizer (G) ----------------
@@ -608,10 +657,11 @@ static void eq_point(int ax, int ay, bool press)
 
 static void draw_view(void)
 {
-    gfx_str(5, 1, eq_open ? "EQUALIZER" : cfg.view ? "SCOPE" : "SPECTRUM", 9, COL(MAGENTA, NAVY));
+    gfx_str(5, 1, eq_open ? "EQUALIZER" : cfg.view == 1 ? "SCOPE" : cfg.view == 2 ? "COVER" : "SPECTRUM", 9, COL(MAGENTA, NAVY));
     gfx_str(5, 11, eq_names[eq_preset], 9, eq_open ? COL(YELLOW, NAVY) : COL(GREY, NAVY));
     if (eq_open) draw_eq();
-    else if (cfg.view) draw_scope();
+    else if (cfg.view == 1) draw_scope();
+    else if (cfg.view == 2) draw_cover();
     else
     {
         for (int b = 0; b < VIZ_BANDS; b++) draw_bar(1 + b, viz.level[b], viz.peak[b]);
@@ -678,7 +728,7 @@ static void draw_help(void)
         { A_NORM, "Space      pause      S      stop" },
         { A_NORM, "N / P      next/prev  , / .  -10s/+10s" },
         { A_NORM, "+ = / - M  vol/mute   H / R  shuffle/rep" },
-        { A_NORM, "V          scope      E      EQ preset" },
+        { A_NORM, "E          EQ preset  V      scope/cover" },
         { A_NORM, "G          equalizer  Z      full screen" },
         { A_NORM, "C          clock      W      weather" },
         { A_NORM, "T          news       / J    search" },
@@ -766,6 +816,7 @@ void ui_frame(void)
         err_seen = st.err_gen;
         if (st.error[0]) ui_message(st.error, true);
     }
+    gfx_band(0, 0, NULL);               // (the cover view sets it again)
     if (help_on) { gfx_set_size(GFX_W, GFX_H); draw_help(); return; }
     if (page != PG_PLAYER) { pages[page]->frame(); return; }
     for (int i = 0; i < 3; i++) tickers[i]->shown = false;
@@ -882,7 +933,7 @@ void ui_key(int k)
     case K_END:   move(list.count); return;
     case K_ENTER: activate(); return;
     case K_BS:    go_parent(); return;
-    case 'V': eq_open = false; cfg.view ^= 1; return;
+    case 'V': eq_open = false; cfg.view = (cfg.view + 1) % 3; return;
     case 'G': eq_open = !eq_open; eq_drag = -1; return;
     case 'Z': ui_page(PG_FULL); return;
     case 'C': ui_page(PG_CLOCK); return;
@@ -941,9 +992,9 @@ void ui_mouse(int x, int y, int button)
         if (st.total && st.seekable) audio_seek_to((x - 8) * st.total / 240);
         return;
     }
-    if (row == 5 && col >= 1 && col <= 9) { if (eq_open) eq_open = false; else cfg.view ^= 1; return; }
+    if (row == 5 && col >= 1 && col <= 9) { if (eq_open) eq_open = false; else cfg.view = (cfg.view + 1) % 3; return; }
     if (row == 5 && col >= 11 && col <= 19) { ui_eq_next(); return; }
-    if (!eq_open && row >= 6 && row <= 16 && col >= 1 && col <= 24) { cfg.view ^= 1; return; }
+    if (!eq_open && row >= 6 && row <= 16 && col >= 1 && col <= 24) { cfg.view = (cfg.view + 1) % 3; return; }
     if (row >= LIST_ROW && row < LIST_ROW + LIST_N)
     {
         if (col == 31) { move(row == LIST_ROW ? -LIST_N : row == LIST_ROW + LIST_N - 1 ? LIST_N : 0); return; }
@@ -1025,6 +1076,8 @@ char *ui_describe(bool the_list)
     else
     {
         o += (size_t)snprintf(b + o, n - o, "page %d%s", page, help_on ? " help" : "");
+        if (page == PG_PLAYER && !help_on && cfg.view == 2)
+            o += (size_t)snprintf(b + o, n - o, " cover=%s", cover_state() == COVER_READY ? "ready" : cover_state() == COVER_MAKING ? "making" : "none");
         if (page != PG_PLAYER && pages[page]->describe) { b[o++] = '\n'; pages[page]->describe(b + o, n - o); }
     }
     return b;

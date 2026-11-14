@@ -29,6 +29,10 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
 * **The picture:** the 24-band spectrum analyser, VU meters, oscilloscope (V), equalizer and balance (G),
   presets (E) and the full-screen pictures (Z). The analyser and equalizer are the PicoVerse Audio
   Engine's code; the equalizer's five bands are the browser's own filters.
+* **The cover (V a third time),** as PICOAMP on the MSX shows it: 80×80 pixels in MSX SCREEN 4 cells
+  (two colours in every 8 pixels of a row) with five palette entries of its own, 12 bars beside it.
+  It comes from the track's tag (MP3, FLAC), else from `cover`, `folder`, `front`, `album`,
+  `albumart` or `AlbumArtSmall` (`.jpg`, `.jpeg`, `.png`) in its folder. A station has none yet.
 * **Clock (C)** with sleep timer and alarm, and **Weather (W)** for the place of your internet connection
   ([GeoJS](https://www.geojs.io)) or a place found by name, from [Open-Meteo](https://open-meteo.com).
   * The alarm and sleep timer only work while the page is open (in a background tab is fine).

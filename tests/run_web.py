@@ -23,6 +23,12 @@ ff('-f', 'lavfi', '-i', "aevalsrc='%s|%s*0.8':s=44100:d=30" % (E, E), '-c:a', 'l
 ff('-f', 'lavfi', '-i', "aevalsrc='%s':s=22050:d=12" % E, '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '64k',
    '-metadata', 'title=A very long title that is much longer than its place on the screen', os.path.join(M, '02 Long.mp3'))
 ff('-f', 'lavfi', '-i', "aevalsrc='%s|%s':s=48000:d=4" % (E, E), os.path.join(M, 'Album', 'Demo.wav'))
+# covers: the folder's (a PNG: the browser decodes it) and a tag's (a JPEG: the program's TJpgDec)
+ff('-f', 'lavfi', '-i', 'color=c=0x2040E0:s=200x200', '-frames:v', '1', os.path.join(M, 'Album', 'cover.png'))
+ff('-f', 'lavfi', '-i', 'color=c=0xE02010:s=300x300', '-frames:v', '1', '-pix_fmt', 'yuvj420p', os.path.join(T, 'red.jpg'))
+ff('-f', 'lavfi', '-i', "aevalsrc='%s':s=44100:d=10" % E, '-i', os.path.join(T, 'red.jpg'), '-map', '0', '-map', '1',
+   '-c:a', 'libmp3lame', '-b:a', '128k', '-c:v', 'copy', '-id3v2_version', '3', '-metadata', 'title=Tagged',
+   '-metadata:s:v', 'comment=Cover (front)', os.path.join(M, 'Album', 'Tagged.mp3'))
 
 # the page (one origin) and the services (another)
 class Quiet(http.server.SimpleHTTPRequestHandler):
@@ -124,6 +130,21 @@ try:
           const d = g.getImageData(0, 0, c.width, c.height).data; const s = new Set();
           for (let i = 0; i < d.length; i += 4 * 97) s.add(d[i] << 16 | d[i + 1] << 8 | d[i + 2]); return s.size; }''')
       check('the picture has colours', str(img), r'^([5-9]|\d\d+)$')
+
+      # the cover view (V a third time): the folder's cover.png, then a tag's picture
+      out = run('key Home; key Down; key Enter; wait 100; key Down; key Enter; wait 1500; key V; key V; wait 1500; page')
+      shot('cover')
+      check('cover: the folder\'s PNG', out, r'page 0 cover=ready')
+      px = page.evaluate('picoamp.pixel(48, 88)')
+      if not (px[2] > px[0] + 60): fails += 1; print('FAIL the folder cover is not blue: %s' % px)
+      else: print('ok   the folder cover is blue')
+      out = run('key Down; key Enter; wait 1500; page')
+      check('cover: the tag\'s JPEG', out, r'page 0 cover=ready')
+      px = page.evaluate('picoamp.pixel(48, 88)')
+      if not (px[0] > px[2] + 60): fails += 1; print('FAIL the tag cover is not red: %s' % px)
+      else: print('ok   the tag cover is red')
+      out = run('key V; page; key BS')
+      check('cover: V goes on to the spectrum', out, r'^page 0$')
 
       # the radio: a station with CORS (Web Audio), one without (as it is), one that is gone
       lists = {'Test.m3u': '#EXTM3U\r\n#EXTINF:-1,Local FM\r\n%s/stream.mp3\r\n#EXTINF:-1,No CORS FM\r\n%s/nocors.mp3\r\n#EXTINF:-1,Gone FM\r\n%s/dead.mp3\r\n' % (SVC, SVC, SVC)}

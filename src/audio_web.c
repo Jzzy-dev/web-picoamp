@@ -12,6 +12,7 @@
 #include "sys.h"
 #include "web.h"
 #include "viz.h"
+#include "cover.h"
 
 static audio_status st;
 static char **pl;                   // files, or "url\x1Fname" for stations
@@ -63,6 +64,7 @@ static void start_url(const char *url, const char *name)
     st.channels = 2;
     st.tls = !u_strnicmp(url, "https:", 6);
     st.title[0] = st.artist[0] = 0;
+    cover_none();
     u_copy(st.album, sizeof st.album, name && *name ? name : url);
     u_copy(st.url, sizeof st.url, url);
     changed();
@@ -96,6 +98,7 @@ static void start_track(int i)
     char *dot = strrchr(st.title, '.');
     if (dot && dot != st.title) *dot = 0;
     st.artist[0] = st.album[0] = 0;
+    cover_none();                       // (the page gives the tag's picture or the folder's)
     u_copy(st.url, sizeof st.url, f);
     changed();
     media_meta();
@@ -304,8 +307,9 @@ static void read_format(const unsigned char *b, size_t n)
     }
 }
 
+// the tags and the tag's picture: 1 a picture was there (else the page looks in the folder)
 EXPORT(web_tags)
-void web_tags(const unsigned char *buf, int len)
+int web_tags(const unsigned char *buf, int len)
 {
     read_format(buf, (size_t)len);
     changed();
@@ -321,4 +325,11 @@ void web_tags(const unsigned char *buf, int len)
         media_meta();
     }
     tag_buf = NULL;
+    size_t off, plen;
+    if (cover_find_in_tag(buf, (size_t)len, &off, &plen) && off + plen <= (size_t)len)
+    {
+        cover_from_bytes(buf + off, plen);
+        return cover_state() != COVER_NONE;
+    }
+    return 0;
 }
