@@ -62,8 +62,8 @@ void rd_urlenc(char *out, size_t size, const char *s)
 }
 
 // where the directory is: PICOAMP_RB (the tests) or its servers
-static int base_count(void) { return getenv("PICOAMP_RB") ? 1 : (int)N_SERVERS; }
-static void base_url(int i, char *out, size_t n)
+int rd_base_count(void) { return getenv("PICOAMP_RB") ? 1 : (int)N_SERVERS; }
+void rd_base_url(int i, char *out, size_t n)
 {
     const char *e = getenv("PICOAMP_RB");
     if (e) { u_copy(out, n, e); return; }
@@ -122,7 +122,7 @@ static void done(void *user, int st, const char *data, size_t len, const char *n
 static void try_server(job_t *jb)
 {
     char url[1400], base[256];
-    base_url(jb->server, base, sizeof base);
+    rd_base_url(jb->server, base, sizeof base);
     snprintf(url, sizeof url, "%s%s", base, jb->path);
     net_fetch(url, done, jb);
 }
@@ -148,7 +148,7 @@ static void done(void *user, int st, const char *data, size_t len, const char *n
     }
     else if (ne && ne[0]) u_copy(jb->err, sizeof jb->err, ne);
     else if (st) snprintf(jb->err, sizeof jb->err, "The station directory answered %d", st);
-    if (!ok && ++jb->server < base_count()) { try_server(jb); return; }
+    if (!ok && ++jb->server < rd_base_count()) { try_server(jb); return; }
     if (ok)
     {
         if (jb->append)
@@ -217,7 +217,7 @@ void rd_click(const char *uuid)
 {
     if (!uuid || !uuid[0]) return;
     char base[256], url[512];
-    base_url(0, base, sizeof base);
+    rd_base_url(0, base, sizeof base);
     snprintf(url, sizeof url, "%s/json/url/%s", base, uuid);
     net_fetch(url, click_done, NULL);
 }

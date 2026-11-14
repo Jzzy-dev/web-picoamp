@@ -242,6 +242,8 @@ bool plat_decode_image(const uint8_t *data, size_t len) { return js_decode_image
 EXPORT(web_cover_rgb) void web_cover_rgb(int w, int h, const uint8_t *rgb) { cover_from_rgb(w, h, rgb, w * 3); }
 // an image the page found in the track's folder (its bytes)
 EXPORT(web_cover_bytes) void web_cover_bytes(const uint8_t *data, int len) { cover_from_bytes(data, (size_t)len); }
+// a station's logo (or len 0: it has none)
+EXPORT(web_logo) void web_logo(const uint8_t *data, int len) { ui_logo(data, (size_t)len); }
 // the band with the cover's palette (lines y0 .. y1 - 1; y1 0: none)
 EXPORT(web_band_y0) int web_band_y0(void) { return gfx_band_y0; }
 EXPORT(web_band_y1) int web_band_y1(void) { return gfx_band_y1; }

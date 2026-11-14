@@ -288,6 +288,69 @@ function js_decode_image(p, n) {
     return 1;
 }
 
+// ---------------- a station's logo ----------------
+// as the MSX engine 0.15 finds it: Radio Browser is asked for the station (by its directory id,
+// else by its address, else by its exact name), its "favicon" is fetched (straight, or through
+// an image proxy when its server allows no other page to read it) and kept in the browser's
+// cache, "no logo" too; the bytes go to the program (web_logo)
+const logoProxy = params.get('logoproxy') || 'https://wsrv.nl/?w=160&h=160&fit=inside&output=png&url=';
+let logoTok = 0;
+function isPicture(b) {
+    if (b.length < 8) return false;
+    const s = String.fromCharCode(...b.slice(0, 4));
+    return (b[0] === 0xFF && b[1] === 0xD8) || s === '\x89PNG' || s === 'GIF8' || s === 'RIFF' ||
+           (b[0] === 0 && b[1] === 0 && b[2] === 1 && b[3] === 0) || (b[0] === 0x42 && b[1] === 0x4D);
+}
+async function getBytes(u) {
+    try {
+        const r = await fetch(u, { signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
+        return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+    } catch { return null; }
+}
+function js_station_logo(up, un, ip, inn, np, nn, rp, rn) {
+    const url = str(up, un), uuid = str(ip, inn), name = str(np, nn), rb = str(rp, rn);
+    const tok = ++logoTok;
+    const done = b => {
+        if (tok !== logoTok) return;
+        const [p, n] = b ? put(b) : [0, 0];
+        try { X.web_logo(p, n); } finally { if (p) X.web_free(p); }
+    };
+    (async () => {
+        const key = location.origin + '/picoamp-logo/' + encodeURIComponent(url);
+        let cache = null;
+        try {
+            cache = await caches.open('picoamp-logos');
+            const hit = await cache.match(key);
+            if (hit) { done(hit.headers.get('x-none') ? null : new Uint8Array(await hit.arrayBuffer())); return; }
+        } catch { cache = null; }
+        let fav = '', answered = false;
+        const ways = [uuid && '/json/stations/byuuid/' + encodeURIComponent(uuid),
+                      '/json/stations/byurl?url=' + encodeURIComponent(url),
+                      name && '/json/stations/search?name=' + encodeURIComponent(name) + '&nameExact=true&limit=1&order=votes&reverse=true&hidebroken=true'];
+        for (const w of ways) {
+            if (!w || fav) continue;
+            const b = await getBytes(rb + w);
+            if (tok !== logoTok) return;
+            if (!b) continue;
+            answered = true;
+            try { const j = JSON.parse(new TextDecoder().decode(b)); fav = (Array.isArray(j) && j[0] && j[0].favicon) || ''; } catch { }
+            if (!/^https?:\/\//.test(fav)) fav = '';
+        }
+        let img = null, known = answered;
+        if (fav) {
+            img = await getBytes(fav);
+            if (!img || !isPicture(img)) img = logoProxy ? await getBytes(logoProxy + encodeURIComponent(fav)) : null;
+            if (img && !isPicture(img)) img = null;
+            else if (!img) known = false;           // (not reached now: asked again next time)
+        }
+        if (tok !== logoTok) return;
+        if (cache && known) {
+            try { await cache.put(key, img ? new Response(img) : new Response('', { headers: { 'x-none': '1' } })); } catch { }
+        }
+        done(img);
+    })();
+}
+
 // ---------------- the web ----------------
 function js_fetch(id, p, n) {
     const url = str(p, n);
@@ -770,7 +833,7 @@ async function start() {
             js_fs_list: (p, n, out, max) => { const l = fsList(str(p, n)); return l === null ? -1 : writeOut(l.join('\n'), out, max); },
             js_fetch, js_music_pick, js_music_list, js_music_name,
             js_audio_play, js_audio_pause, js_audio_stop, js_audio_seek, js_audio_gain, js_audio_eq, js_audio_meta,
-            js_can_play, js_open_lists, js_fullscreen: toggleFullscreen, js_decode_image,
+            js_can_play, js_open_lists, js_fullscreen: toggleFullscreen, js_decode_image, js_station_logo,
             js_geolocate: () => { },
         },
     };

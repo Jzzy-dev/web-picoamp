@@ -28,3 +28,5 @@ void rd_click(const char *uuid);        // tell the directory a station is playe
 void rd_urlenc(char *out, size_t size, const char *s);
 bool rd_codec_ok(const char *codec);    // one PicoAmp plays
 const char *rd_codec_query(void);       // "&codec=MP3" or "" (MP3 and AAC)
+int  rd_base_count(void);               // the directory's servers (PICOAMP_RB: one, the tests')
+void rd_base_url(int i, char *out, size_t n);

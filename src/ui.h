@@ -1,6 +1,8 @@
 // ui.h - PICOAMP's screen and keys, drawn into the gfx picture
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
 
 // keys: printable ones as their character; these for the rest
 enum
@@ -21,6 +23,7 @@ void ui_drop(const char *const *paths, int n);   // files dropped on the window
 void ui_message(const char *text, bool error);
 bool ui_quit_requested(void);
 void ui_save_state(void);
+void ui_logo(const uint8_t *data, size_t len);   // the page: the logo of the station that plays (len 0: none)
 void ui_reload(void);                     // the place again (its lists were changed)                 // into cfg before it is saved
 // for the scripts: the list (path, entries) or what the page shows, as text (malloc'd)
 char *ui_describe(bool the_list);

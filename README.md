@@ -32,7 +32,13 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
 * **The cover (V a third time),** as PICOAMP on the MSX shows it: 80×80 pixels in MSX SCREEN 4 cells
   (two colours in every 8 pixels of a row) with five palette entries of its own, 12 bars beside it.
   It comes from the track's tag (MP3, FLAC), else from `cover`, `folder`, `front`, `album`,
-  `albumart` or `AlbumArtSmall` (`.jpg`, `.jpeg`, `.png`) in its folder. A station has none yet.
+  `albumart` or `AlbumArtSmall` (`.jpg`, `.jpeg`, `.png`) in its folder.
+  A station shows its logo, found as the MSX engine finds it. Radio Browser is asked for the station
+  by its directory id, else by its address, else by its exact name. The station's `favicon` is kept
+  in the browser's cache, and "no logo" is kept too, so the next start asks nothing. Most logo
+  servers do not let other pages read their pictures (CORS), and a page on https cannot fetch from
+  http. Those logos come through the public image proxy [wsrv.nl](https://wsrv.nl/), which gets the
+  logo's address and nothing else.
 * **Clock (C)** with sleep timer and alarm, and **Weather (W)** for the place of your internet connection
   ([GeoJS](https://www.geojs.io)) or a place found by name, from [Open-Meteo](https://open-meteo.com).
   * The alarm and sleep timer only work while the page is open (in a background tab is fine).

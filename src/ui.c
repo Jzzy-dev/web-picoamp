@@ -25,6 +25,7 @@
 #include "util.h"
 #include "pages.h"
 #include "radiodir.h"
+#include "web.h"
 
 #define LIST_ROW 19
 #define LIST_N   4
@@ -503,9 +504,51 @@ static void freq_label(int bar) { freq_label_at(bar, bar + 1); }
 static char     cover_for[2048];        // the track the cover was asked for
 static bool     cover_asked;
 
+static bool     logo_wait;              // a station's logo asked for
+
+// a station's directory id, when the list shows it (its address and name; else its address)
+static const char *station_uuid(const char *url, const char *name)
+{
+    const char *u = NULL;
+    for (int i = 0; i < list.count; i++)
+        if (list.e[i].type == E_STATION && list.e[i].uuid[0] && !strcmp(list.e[i].target, url))
+        {
+            if (!strcmp(list.e[i].name, name)) return list.e[i].uuid;
+            if (!u) u = list.e[i].uuid;
+        }
+    return u;
+}
+
+// the page's answer: the logo of the station that plays (it may come late)
+void ui_logo(const uint8_t *data, size_t len)
+{
+    if (!logo_wait || !st.stream) return;
+    logo_wait = false;
+    if (len) cover_from_bytes(data, len);
+    else cover_none();
+}
+
 static void cover_follow(void)
 {
-    if (st.stream || (st.state == ST_STOPPED && !st.url[0])) { cover_none(); cover_asked = false; cover_for[0] = 0; return; }
+    if (st.stream)
+    {
+        // a station: its logo, as the MSX engine finds it (asked for once a station start)
+        char k[sizeof cover_for];
+        snprintf(k, sizeof k, "%s\x1f%s", st.url, st.album);     // (a station: its address and name)
+        if (cover_asked && !strcmp(cover_for, k)) return;
+        u_copy(cover_for, sizeof cover_for, k);
+        cover_asked = true;
+        cover_none();
+        logo_wait = true;
+        const char *uuid = station_uuid(st.url, st.album);
+        char rb[256];
+        rd_base_url(0, rb, sizeof rb);
+        js_station_logo(st.url, (int)strlen(st.url), uuid ? uuid : "", uuid ? (int)strlen(uuid) : 0,
+                        st.album, (int)strlen(st.album), rb, (int)strlen(rb));
+        return;
+    }
+    logo_wait = false;
+    if (st.state == ST_STOPPED && !st.url[0]) { cover_none(); cover_asked = false; cover_for[0] = 0; return; }
     if (cover_asked && !strcmp(cover_for, st.url)) return;
     u_copy(cover_for, sizeof cover_for, st.url);
     cover_asked = true;

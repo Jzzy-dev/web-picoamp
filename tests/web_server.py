@@ -6,6 +6,8 @@
 #   Open-Meteo                     /meteo/v1/forecast, /geo/v1/search
 #   streams                        /stream.mp3 (CORS), /nocors.mp3 (none), /dead.mp3 (404)
 #   files                          /music/<name> (the test's music, CORS)
+#   station logos                  /json/stations/byuuid/<uuid>, /json/stations/byurl; /logos/green.png
+#                                  (CORS), /logos/nocors.png (none: through /proxy?url=, as wsrv.nl)
 #
 #   web_server.py <port> <mp3 for the streams> <music folder>
 import http.server, json, os, sys, urllib.parse, time, threading
@@ -14,8 +16,9 @@ PORT, MP3, MUSIC = int(sys.argv[1]), sys.argv[2], sys.argv[3]
 STREAM = 'http://127.0.0.1:%d/stream.mp3' % PORT
 
 def station(i, name=None, codec='MP3', hls=0):
-    return {"stationuuid": "uuid-%d" % i, "name": name or ("Station %d" % i), "url": STREAM,
-            "url_resolved": STREAM, "codec": codec, "bitrate": 128, "hls": hls, "lastcheckok": 1,
+    u = STREAM + '?s=%d' % i                # (each its own address, as real ones)
+    return {"stationuuid": "uuid-%d" % i, "name": name or ("Station %d" % i), "url": u,
+            "url_resolved": u, "codec": codec, "bitrate": 128, "hls": hls, "lastcheckok": 1,
             "countrycode": "NL", "tags": "jazz,pop"}
 
 clicks = []
@@ -53,6 +56,22 @@ class H(http.server.BaseHTTPRequestHandler):
             else:
                 v = [station(i) for i in range(5)] + [station(9, "An AAC one", "AAC")]
             self.reply(json.dumps(v))
+        elif p.startswith('/json/stations/byuuid/'):
+            u = p[22:]
+            print("byuuid", u, flush=True)
+            s = station(int(u[5:]) if u.startswith('uuid-') else 99)
+            s['favicon'] = {'uuid-1': 'http://127.0.0.1:%d/logos/green.png' % PORT,
+                            'uuid-2': 'http://127.0.0.1:%d/logos/nocors.png' % PORT}.get(u, '')
+            self.reply(json.dumps([s]))
+        elif p == '/json/stations/byurl':
+            print("byurl", q.get('url'), flush=True)
+            self.reply('[]')
+        elif p in ('/logos/green.png', '/logos/nocors.png'):
+            print("logo", p, flush=True)
+            self.reply(open(os.path.join(os.path.dirname(MUSIC), 'logo.png'), 'rb').read(), 'image/png', cors=p == '/logos/green.png')
+        elif p == '/proxy':
+            print("proxy", q.get('url'), flush=True)
+            self.reply(open(os.path.join(os.path.dirname(MUSIC), 'logo.png'), 'rb').read(), 'image/png')
         elif p.startswith('/json/url/'):
             clicks.append(p[10:])
             print("click", p[10:], flush=True)
@@ -74,7 +93,7 @@ class H(http.server.BaseHTTPRequestHandler):
                           "temperature_2m_max": [10.2, 11.0, 12.5, 3.1, 15.0, 9.9],
                           "temperature_2m_min": [4.1, 3.0, 4.4, -6.2, 10.0, 2.2],
                           "precipitation_probability_max": [80, 20, 0, 65, 100, 10]}}))
-        elif p in ('/stream.mp3', '/nocors.mp3'):
+        elif p in ('/stream.mp3', '/nocors.mp3'):    # (?s=<n>: the same)
             self.reply(open(MP3, 'rb').read(), 'audio/mpeg', cors=p == '/stream.mp3')
         elif p.startswith('/music/'):
             f = os.path.join(MUSIC, urllib.parse.unquote(p[7:]))

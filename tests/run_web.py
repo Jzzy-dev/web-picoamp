@@ -26,6 +26,8 @@ ff('-f', 'lavfi', '-i', "aevalsrc='%s|%s':s=48000:d=4" % (E, E), os.path.join(M,
 # covers: the folder's (a PNG: the browser decodes it) and a tag's (a JPEG: the program's TJpgDec)
 ff('-f', 'lavfi', '-i', 'color=c=0x2040E0:s=200x200', '-frames:v', '1', os.path.join(M, 'Album', 'cover.png'))
 ff('-f', 'lavfi', '-i', 'color=c=0xE02010:s=300x300', '-frames:v', '1', '-pix_fmt', 'yuvj420p', os.path.join(T, 'red.jpg'))
+# a station's logo: green
+ff('-f', 'lavfi', '-i', 'color=c=0x20D040:s=128x128', '-frames:v', '1', os.path.join(T, 'logo.png'))
 ff('-f', 'lavfi', '-i', "aevalsrc='%s':s=44100:d=10" % E, '-i', os.path.join(T, 'red.jpg'), '-map', '0', '-map', '1',
    '-c:a', 'libmp3lame', '-b:a', '128k', '-c:v', 'copy', '-id3v2_version', '3', '-metadata', 'title=Tagged',
    '-metadata:s:v', 'comment=Cover (front)', os.path.join(M, 'Album', 'Tagged.mp3'))
@@ -43,7 +45,7 @@ log = open(os.path.join(T, 'svc.log'), 'w')
 svc = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tests', 'web_server.py'), str(SVC_PORT), os.path.join(M, '01 Sine.mp3'), M], stdout=log, stderr=log)
 time.sleep(0.6)
 
-URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi' % (PAGE_PORT, SVC, SVC, SVC, SVC)
+URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi&logoproxy=%s/proxy%%3Furl%%3D' % (PAGE_PORT, SVC, SVC, SVC, SVC, SVC)
 fails = 0
 def check(name, out, pattern):
     global fails
@@ -231,6 +233,27 @@ try:
       check_not('directory: HLS left out', out, r'Jazz HLS')
       time.sleep(0.3)
       check('directory: the play is counted', open(os.path.join(T, 'svc.log')).read(), r'click uuid-1')
+
+      # a station's logo as its cover: by its directory id; a logo whose server allows no CORS (the
+      # proxy); kept in the browser's cache (not asked again); a station without one
+      load({'folder': 'radio:'})
+      out = run('key Home; key Down; key Down; key Enter; wait 500; key Down; key Down; key Enter; wait 1500; key V; key V; wait 1500; page')
+      shot('logo')
+      check('logo: the directory\'s station', out, r'page 0 cover=ready')
+      px = page.evaluate('picoamp.pixel(48, 88)')
+      if not (px[1] > px[0] + 60 and px[1] > px[2] + 60): fails += 1; print('FAIL the logo is not green: %s' % px)
+      else: print('ok   the logo is green')
+      out = run('key Down; key Enter; wait 2000; page; key V')
+      check('logo: through the proxy', out, r'page 0 cover=ready')
+      check('logo: the proxy asked', open(os.path.join(T, 'svc.log')).read(), r'proxy http://127\.0\.0\.1:\d+/logos/nocors\.png')
+      n1 = open(os.path.join(T, 'svc.log')).read().count('byuuid uuid-1')
+      load({'folder': 'radio:'})
+      out = run('key Home; key Down; key Down; key Enter; wait 500; key Down; key Down; key Enter; wait 1500; key V; key V; wait 500; page')
+      check('logo: from the cache', out, r'page 0 cover=ready')
+      if open(os.path.join(T, 'svc.log')).read().count('byuuid uuid-1') != n1: fails += 1; print('FAIL logo: asked again')
+      else: print('ok   logo: not asked again')
+      out = run('key Up; key Enter; wait 2000; page; key V')
+      check('logo: a station without one', out, r'page 0 cover=none')
 
       # the clock (place by IP, by name; sleep timer; alarm) and the weather
       out = run('key C; wait 1500; page')

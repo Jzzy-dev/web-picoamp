@@ -21,6 +21,10 @@ JS(js_fs_read)      int    js_fs_read(const char *path, int n, void *buf, int ma
 JS(js_fs_write)     int    js_fs_write(const char *path, int n, const void *buf, int len);
 JS(js_fs_list)      int    js_fs_list(const char *dir, int n, char *out, int max);   // "name\n"...
 
+// a station's logo (Radio Browser's favicon, kept in the browser's cache): the
+// answer comes in web_logo(bytes) (len 0: none)
+JS(js_station_logo) void   js_station_logo(const char *url, int un, const char *uuid, int uun, const char *name, int nn, const char *rb, int rn);
+
 // the web: fetch url; the answer comes in net_done(id, ...)
 JS(js_fetch)        void   js_fetch(int id, const char *url, int n);
 
