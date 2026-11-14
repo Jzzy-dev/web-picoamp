@@ -28,6 +28,7 @@ static int key_code(const char *k)
         { "Up", K_UP }, { "Down", K_DOWN }, { "Left", K_LEFT }, { "Right", K_RIGHT }, { "Enter", K_ENTER },
         { "BS", K_BS }, { "Esc", K_ESC }, { "Space", ' ' }, { "Del", K_DEL }, { "Home", K_HOME }, { "End", K_END },
         { "PgUp", K_PGUP }, { "PgDn", K_PGDN }, { "Tab", '\t' }, { "CtrlUp", K_CTRL_UP }, { "CtrlDown", K_CTRL_DOWN },
+        { "F1", K_F1 },
     };
     for (unsigned i = 0; i < sizeof names / sizeof names[0]; i++) if (!u_stricmp(k, names[i].n)) return names[i].c;
     return (unsigned char)k[0];
@@ -53,8 +54,13 @@ bool script_step(void)
         {
             int mx = 0, my = 0;
             sscanf(a, "%d %d %63s", &mx, &my, c);
-            ui_mouse(mx, my, !strcmp(c, "right") ? MOUSE_RIGHT : MOUSE_LEFT);
-            ui_mouse(mx, my, MOUSE_UP);
+            if (!strcmp(c, "wheelup") || !strcmp(c, "wheeldown"))
+                ui_mouse(mx, my, c[5] == 'u' ? MOUSE_WHEEL_UP : MOUSE_WHEEL_DOWN);
+            else
+            {
+                ui_mouse(mx, my, !strcmp(c, "right") ? MOUSE_RIGHT : MOUSE_LEFT);
+                ui_mouse(mx, my, MOUSE_UP);
+            }
             until = sys_millis() + 20;
             return true;
         }

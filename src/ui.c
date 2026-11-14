@@ -345,6 +345,7 @@ static void draw_static(void)
     gfx_clear(NAVY);
     gfx_fill(0, 0, 32, A_TITLE);
     gfx_str(0, 1, "PICOAMP", 9, A_TITLE);
+    gfx_char(0, 30, '?', COL(NAVY, CYAN));           // the help (a box, as the close box)
     gfx_cell(0, 31, pat_close, COL(WHITE, RED));
     for (int c = 1; c <= 30; c++) gfx_cell(4, c, pat_track, COL(GREY, NAVY));
     gfx_str(5, 25, "LEVEL", 5, COL(MAGENTA, NAVY));
@@ -405,7 +406,7 @@ static void draw_info(void)
     if (name) u_copy(line, sizeof line, st.album);
     else if (st.state == ST_PLAYING) snprintf(line, sizeof line, "PLAYING %d/%d", st.pl_pos + 1, st.pl_count);
     else u_copy(line, sizeof line, st.state == ST_PAUSED ? "PAUSED" : "STOPPED");
-    gfx_str(0, 11, line, 20, A_TITLE);
+    gfx_str(0, 11, line, 19, A_TITLE);
     // SHF REP: green when on
     gfx_str(23, 9, "SHF", 3, (st.mode & MODE_SHUFFLE) ? COL(GREEN, BLUE_D) : COL(GREY, BLUE_D));
     gfx_str(23, 13, "REP", 3, (st.mode & MODE_REPEAT) ? COL(GREEN, BLUE_D) : COL(GREY, BLUE_D));
@@ -684,16 +685,16 @@ static void draw_help(void)
         { A_NORM, "F          favourite+ D, DEL favourite-" },
         { A_NORM, "Ctrl+Up/Down  move a favourite" },
         { A_NORM, "O          edit the station lists" },
+        { A_NORM, "? or F1    this help (or click the ?)" },
         { COL(CYAN, NAVY), "Page: F11, Alt+Enter or a double click" },
         { COL(CYAN, NAVY), "  outside the picture: full screen," },
         { COL(CYAN, NAVY), "  F2 scaling: fit / whole / stretch," },
         { COL(CYAN, NAVY), "  F3 scan lines; media keys work" },
         { COL(CYAN, NAVY), "Mouse: click, again to play; the right" },
         { COL(CYAN, NAVY), "  button goes back, the wheel scrolls" },
+        { COL(CYAN, NAVY), "  (on VOL: the wheel sets the volume)" },
         { COL(CYAN, NAVY), "Drop music or .m3u/.pls files on the" },
         { COL(CYAN, NAVY), "  page: play them, add them" },
-        { A_NORM, "" },
-        { A_NORM, "" },
         { COL(GREY, NAVY), "press a key" },
     };
     gfx_clear(NAVY);
@@ -830,6 +831,7 @@ bool ui_playback_key(int k)
 
 void ui_key(int k)
 {
+    if (k == K_F1) { help_on = !help_on; return; }
     if (help_on) { help_on = false; return; }
     if (page != PG_PLAYER) { pages[page]->key(k); return; }
     if (searching)
@@ -918,11 +920,18 @@ void ui_mouse(int x, int y, int button)
         if (eq_open && eq_drag >= 0) eq_point(x - 8, y - 48, false);
         return;
     }
-    if (button == MOUSE_WHEEL_UP) { move(-1); return; }
-    if (button == MOUSE_WHEEL_DOWN) { move(1); return; }
+    if (button == MOUSE_WHEEL_UP || button == MOUSE_WHEEL_DOWN)
+    {
+        // the wheel on the volume (VOL and its bar): louder / softer; elsewhere it scrolls
+        if (y >= 23 * 8 && y < GFX_H && x >= 20 * 8 && x < GFX_W)
+            ui_playback_key(button == MOUSE_WHEEL_UP ? '+' : '-');
+        else move(button == MOUSE_WHEEL_UP ? -1 : 1);
+        return;
+    }
     if (button == MOUSE_RIGHT) { if (eq_open) eq_open = false; else go_parent(); return; }
     if (button != MOUSE_LEFT || x < 0 || y < 0 || x >= GFX_W || y >= GFX_H) return;
     int row = y / 8, col = x / 8;
+    if (row == 0 && col == 30) { help_on = true; return; }
     if (row == 0 && col == 31) { quit_req = true; plat_quit(); return; }
     if (searching) { searching = false; return; }
     if (eq_open && row >= 6 && row <= 15 && col >= 1 && col <= 24) { eq_point(x - 8, y - 48, true); return; }
@@ -1015,7 +1024,7 @@ char *ui_describe(bool the_list)
     }
     else
     {
-        o += (size_t)snprintf(b + o, n - o, "page %d", page);
+        o += (size_t)snprintf(b + o, n - o, "page %d%s", page, help_on ? " help" : "");
         if (page != PG_PLAYER && pages[page]->describe) { b[o++] = '\n'; pages[page]->describe(b + o, n - o); }
     }
     return b;

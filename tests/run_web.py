@@ -182,6 +182,21 @@ try:
       check('editor: renamed and edited', out, r'1 My list')
       check('editor: the text', page.evaluate('picoamp.fs.get("/PicoAmp/Radio/My list.m3u")') or '', r'Edited FM\r\nhttps://e\.example')
 
+      # the help (the ? box, F1, ?) and the wheel on the volume
+      out = run('click 244 4; page; key x; key F1; page; key F1; page; key ?; page; key Esc; status; click 200 188 wheelup; click 230 188 wheelup; status; click 170 188 wheeldown; status')
+      check('help: the ? box', out, r'^page 0 help')
+      check('help: F1', out, r'page 0 help\npage 0\npage 0 help')
+      check('wheel on VOL: louder', out, r'vol=90')
+      check('wheel on VOL: softer', out, r'vol=85')
+      page.keyboard.press('F1')
+      check('help: the F1 key of the page', run('page'), r'page 0 help')
+      page.keyboard.press('Escape')
+      canvas = page.locator('#screen').bounding_box()
+      page.mouse.move(canvas['x'] + canvas['width'] * 0.85, canvas['y'] + canvas['height'] * 0.98)
+      page.mouse.wheel(0, -100)
+      time.sleep(0.2)
+      check('wheel on VOL: the real mouse', run('status'), r'vol=90')
+
       # the station directory: lists, a country, more stations, search
       load({'folder': 'radio:'})
       out = run('key Home; key Down; key Down; key Enter; wait 500; list; key Down; key Down; key Enter; wait 2500; status; key BS; key Down; key Down; key Down; key Enter; wait 500; list; key Down; key Down; key Enter; wait 500; list; key BS; key BS; key Down; key Enter; key Down; key Down; key Down; key Down; key Down; key Down; key Down; key Down; key Down; key Enter; wait 500; key End; key Enter; wait 500; list; key /; type jazz; key Enter; wait 500; list')

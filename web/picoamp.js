@@ -442,7 +442,7 @@ function mediaPosition(a) {
 }
 const K = { ENTER: 13, BS: 8, ESC: 27, UP: 0x100, DOWN: 0x101, LEFT: 0x102, RIGHT: 0x103, PGUP: 0x104, PGDN: 0x105,
     HOME: 0x106, END: 0x107, DEL: 0x108, PLAY: 0x109, STOP: 0x10A, NEXT: 0x10B, PREV: 0x10C, VUP: 0x10D, VDOWN: 0x10E,
-    MUTE: 0x10F, CUP: 0x110, CDOWN: 0x111 };
+    MUTE: 0x10F, CUP: 0x110, CDOWN: 0x111, F1: 0x120 };
 if (ms) {
     const h = (a, k) => { try { ms.setActionHandler(a, () => { ensureCtx(); X.web_key(k); }); } catch { } };
     h('play', K.PLAY); h('pause', K.PLAY); h('stop', K.STOP); h('nexttrack', K.NEXT); h('previoustrack', K.PREV);
@@ -515,7 +515,7 @@ function draw() {
 // ---------------- keys and the mouse ----------------
 const named = { Enter: K.ENTER, Backspace: K.BS, Escape: K.ESC, ArrowLeft: K.LEFT, ArrowRight: K.RIGHT,
     PageUp: K.PGUP, PageDown: K.PGDN, Home: K.HOME, End: K.END, Delete: K.DEL, MediaPlayPause: K.PLAY,
-    MediaStop: K.STOP, MediaTrackNext: K.NEXT, MediaTrackPrevious: K.PREV, Tab: 9 };
+    MediaStop: K.STOP, MediaTrackNext: K.NEXT, MediaTrackPrevious: K.PREV, Tab: 9, F1: K.F1 };
 const scaleNames = ['Scaling: fit, 4:3, sharp', 'Scaling: whole multiples', 'Scaling: stretch to the window'];
 
 function message(s, err) { withStr(s, p => X.web_message(p, err ? 1 : 0)); }

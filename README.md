@@ -35,7 +35,8 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
 * **Media keys and the lock screen:** play/pause, next and previous work through the browser.
 * **Any window size:** fit at 4:3 and sharp (whole-pixel enlargement, only the last step smoothed).
   F2 switches to whole multiples or stretch, F3 adds scan lines, and F11, Alt+Enter or a double click
-  beside the picture goes full screen. H shows all the keys.
+  beside the picture goes full screen. **?** or **F1** (or the **?** box at the top right) shows all the keys.
+* **The mouse:** click to choose, click again to play, right button goes back. The wheel scrolls the list; over **VOL** it sets the volume.
 * **Your lists:** **O** opens an editor for the station lists. You can create, rename, delete and edit
   lists as `.m3u` text, and import or export `.m3u`/`.pls` files. You can also drop an `.m3u`/`.pls` file
   on the page. F adds a station to Favourites, D removes it, and Ctrl+Up/Down moves it.
