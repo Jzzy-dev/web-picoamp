@@ -5,6 +5,8 @@
 #   GeoJS                          /ipapi/v1/ip/geo.json
 #   Open-Meteo                     /meteo/v1/forecast, /geo/v1/search
 #   streams                        /stream.mp3 (CORS), /nocors.mp3 (none), /dead.mp3 (404)
+#   what a station plays           /status-json.xsl (Icecast's: /stream.mp3 plays "Unit Tester - Sine
+#                                  Cafe Song"); /icy.mp3 sends ICY titles ("Artist One - Song A")
 #   files                          /music/<name> (the test's music, CORS)
 #   station logos                  /json/stations/byuuid/<uuid>, /json/stations/byurl; /logos/green.png
 #                                  (CORS), /logos/nocors.png (none: through /proxy?url=, as wsrv.nl)
@@ -34,6 +36,12 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(b)))
         self.end_headers()
         self.wfile.write(b)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Headers', 'Icy-MetaData')
+        self.end_headers()
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
@@ -76,7 +84,7 @@ class H(http.server.BaseHTTPRequestHandler):
             t, cb = q.get('term', ''), q.get('callback', '')
             print("itunes", t, flush=True)
             j = {"resultCount": 0, "results": []}
-            if t.startswith('Unit Tester'):
+            if t.startswith('Unit Tester') or t.startswith('Artist One'):
                 j = {"resultCount": 1, "results": [{"artistName": "Unit Tester", "artworkUrl100": "http://127.0.0.1:%d/art/100x100bb.jpg" % PORT}]}
             body = json.dumps(j)
             self.reply('%s(%s);' % (cb, body) if cb else body, 'text/javascript')
@@ -104,6 +112,28 @@ class H(http.server.BaseHTTPRequestHandler):
                           "temperature_2m_max": [10.2, 11.0, 12.5, 3.1, 15.0, 9.9],
                           "temperature_2m_min": [4.1, 3.0, 4.4, -6.2, 10.0, 2.2],
                           "precipitation_probability_max": [80, 20, 0, 65, 100, 10]}}))
+        elif p == '/status-json.xsl':
+            print("status", flush=True)
+            self.reply(json.dumps({"icestats": {"source": [
+                {"listenurl": STREAM, "title": "Unit Tester - Sine Cafe Song"},
+                {"listenurl": 'http://127.0.0.1:%d/other' % PORT, "title": "Someone - Else"}]}}))
+        elif p == '/icy.mp3':
+            data, mi = open(MP3, 'rb').read(), 4096
+            meta = b"StreamTitle='Artist One - Song A';"
+            meta += b'\0' * (-len(meta) % 16)
+            out = bytearray()
+            for i in range(0, len(data), mi):
+                out += data[i:i + mi]
+                out += bytes([len(meta) // 16]) + meta if self.headers.get('Icy-MetaData') == '1' else b''
+            self.send_response(200)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Expose-Headers', 'icy-metaint')
+            if self.headers.get('Icy-MetaData') == '1': self.send_header('icy-metaint', str(mi))
+            self.send_header('Content-Type', 'audio/mpeg')
+            self.send_header('Content-Length', str(len(out)))
+            self.end_headers()
+            try: self.wfile.write(out)
+            except Exception: pass
         elif p in ('/stream.mp3', '/nocors.mp3'):    # (?s=<n>: the same)
             self.reply(open(MP3, 'rb').read(), 'audio/mpeg', cors=p == '/stream.mp3')
         elif p.startswith('/music/'):

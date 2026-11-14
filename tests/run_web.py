@@ -268,6 +268,17 @@ try:
       else: print('ok   logo: not asked again')
       out = run('key Up; key Enter; wait 2000; page; key V')
       check('logo: a station without one: a default picture', out, r'page 0 cover=ready')
+      # what a station plays (Icecast's status), its song's cover; the stream's own titles (ICY)
+      run('key V; key V; wait 2500')
+      check('station: its song read (Icecast status)', run('status'), r"title='Sine Cafe Song' artist='Unit Tester'")
+      run('wait 1500')
+      shot('songcover')
+      px = page.evaluate('picoamp.pixel(48, 88)')
+      if not (px[1] > px[0] + 60 and px[1] > px[2] + 60): fails += 1; print('FAIL the song cover is not green: %s' % px)
+      else: print('ok   the song\'s cover (green)')
+      t = page.evaluate('picoamp.npIcy("%s/icy.mp3")' % SVC)
+      check('station: the stream\'s own title (ICY)', str(t), r'^Artist One - Song A$')
+      run('key V')
 
       # the clock (place by IP, by name; sleep timer; alarm) and the weather
       out = run('key C; wait 1500; page')

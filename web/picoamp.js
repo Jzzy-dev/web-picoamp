@@ -480,7 +480,7 @@ function stopElements() {
     if (cur && cur.url) URL.revokeObjectURL(cur.url);
 }
 
-function js_audio_stop() { gen++; stopElements(); cur = null; mediaState('none'); }
+function js_audio_stop() { gen++; npStop(); stopElements(); cur = null; mediaState('none'); }
 function js_audio_pause(on) {
     const a = cur && cur.usingPlain ? plain : el;
     if (on) a.pause(); else { ensureCtx(); a.play().catch(() => { }); }
@@ -490,10 +490,73 @@ function js_audio_seek(s) { if (cur && !cur.usingPlain) el.currentTime = s; }
 
 function cErr(msg) { withStr(msg, p => X.web_audio_error(p)); }
 
+// ---------------- what a station plays ----------------
+// the browser's audio element keeps a station's song titles to itself: they are read beside it,
+// every 20 s: the Icecast server's status (status-json.xsl; most allow other pages to read it), else
+// the stream itself for a moment (Icy-MetaData: 1, up to its first title; where the station allows it)
+let npTimer = 0, npGen = 0, npLast = '';
+function npStop() { clearTimeout(npTimer); npTimer = 0; npGen++; npLast = ''; }
+async function npStatus(url) {
+    try {
+        const u = new URL(url);
+        const r = await fetch(u.origin + '/status-json.xsl', { signal: AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined });
+        if (!r.ok) return null;
+        const j = await r.json();
+        let s = j && j.icestats && j.icestats.source;
+        if (!s) return null;
+        if (!Array.isArray(s)) s = [s];
+        const m = s.find(x => x.listenurl && new URL(x.listenurl, u.origin).pathname === u.pathname) || (s.length === 1 ? s[0] : null);
+        if (!m) return null;
+        const t = m.artist && m.title ? m.artist + ' - ' + m.title : (m.title || m.yp_currently_playing || '');
+        return t ? String(t) : null;
+    } catch { return null; }
+}
+async function npIcy(url) {
+    const ac = new AbortController();
+    const tm = setTimeout(() => ac.abort(), 8000);
+    try {
+        const r = await fetch(url, { headers: { 'Icy-MetaData': '1' }, signal: ac.signal, cache: 'no-store' });
+        const mi = parseInt(r.headers.get('icy-metaint') || '0', 10);
+        if (!r.ok || !mi || !r.body || mi > 256 * 1024) return null;
+        const rd = r.body.getReader();
+        let skip = mi, need = -1, meta = null, got = 0;
+        for (;;) {
+            const { value, done } = await rd.read();
+            if (done || !value) return null;
+            let i = 0;
+            while (i < value.length) {
+                if (skip > 0) { const k = Math.min(skip, value.length - i); skip -= k; i += k; continue; }
+                if (need < 0) { need = value[i++] * 16; if (!need) return ''; meta = new Uint8Array(need); continue; }
+                const k = Math.min(need - got, value.length - i);
+                meta.set(value.subarray(i, i + k), got); got += k; i += k;
+                if (got === need) {
+                    const s = new TextDecoder().decode(meta);
+                    const m = /StreamTitle='(.*?)';/.exec(s);
+                    return m ? m[1] : '';
+                }
+            }
+        }
+    } catch { return null; } finally { clearTimeout(tm); ac.abort(); }
+}
+function npStart(url) {
+    npStop();
+    const g = npGen;
+    let useIcy = true;
+    const tick = async () => {
+        let t = await npStatus(url);
+        if (g !== npGen) return;
+        if (t === null && useIcy) { t = await npIcy(url); if (g !== npGen) return; if (t === null) useIcy = false; }
+        if (t && t !== npLast) { npLast = t; withStr(t, p => X.web_audio_title(p)); }
+        npTimer = setTimeout(tick, 20000);
+    };
+    npTimer = setTimeout(tick, 1500);
+}
+
 function js_audio_play(p, n, isFile) {
     const src = str(p, n);
     ensureCtx();
     stopElements();
+    npStop();
     const g = ++gen;
     cur = { src, isFile: !!isFile, gen: g, usingPlain: false };
     lastT = 0;
@@ -519,6 +582,7 @@ function js_audio_play(p, n, isFile) {
     }
     let url = src;
     if (location.protocol === 'https:' && /^http:/i.test(url)) cur.insecure = true;
+    if (!cur.insecure) npStart(url);
     el.src = url;
     el.play().catch(e => { if (g === gen && e.name === 'NotAllowedError') cErr(playError(e)); });
 }
@@ -853,6 +917,7 @@ window.picoamp = {
         const cx = Math.floor(dest.x + (x + 0.5) * dest.w / 256), cy = Math.floor(dest.y + (y + 0.5) * dest.h / 192);
         return Array.from(g2.getImageData(cx, cy, 1, 1).data.slice(0, 3));
     },
+    npIcy,                                // (the tests: a stream's own title)
     get audio() { return { cur, paused: el.paused, plainPaused: plain.paused, gainL, gainR, eqGains, ctx: ctx && ctx.state }; },
 };
 

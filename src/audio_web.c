@@ -264,11 +264,24 @@ void web_audio_error(const char *msg)
     set_error(msg);
 }
 
-// a stream's title (when the page knows one)
+// a stream's title (the page reads it from the station): "Artist - Title" split as the MSX does
 EXPORT(web_audio_title)
-void web_audio_title(const char *title)
+void web_audio_title(const char *t)
 {
-    u_copy(st.title, sizeof st.title, title);
+    const char *d = strstr(t, " - ");
+    if (d && d != t)
+    {
+        size_t a = (size_t)(d - t);
+        if (a >= sizeof st.artist) a = sizeof st.artist - 1;
+        memcpy(st.artist, t, a);
+        st.artist[a] = 0;
+        u_copy(st.title, sizeof st.title, d + 3);
+    }
+    else
+    {
+        u_copy(st.title, sizeof st.title, t);
+        st.artist[0] = 0;
+    }
     changed();
     media_meta();
 }
