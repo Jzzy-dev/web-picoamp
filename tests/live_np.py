@@ -33,23 +33,22 @@ with sync_playwright() as pw:
     page = br.new_page()
     page.goto('http://127.0.0.1:8773/')
     page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
-    res = page.evaluate('''async list => {
-        const out = await Promise.all(list.map(async ([n, u]) => {
-            const t = await Promise.race([picoamp.npProbe(u), new Promise(ok => setTimeout(() => ok('(too slow)'), 90000))]);
-            return n + ' | ' + u + ' | ' + t;
-        }));
-        return out; }''', st)
+    res = page.evaluate('''async list => Promise.all(list.map(async ([n, u]) => {
+            const t = await Promise.race([picoamp.npProbe(u), new Promise(ok => setTimeout(() => ok(null), 90000))]);
+            return { n, u, t };
+        }))''', st)
     br.close()
 srv.shutdown()
 
-ways = {}
-found = 0
-for l in res:
-    print(l)
-    got = [w for w in l.split(' | ')[-1].split(' ') if '=' in w and not w.endswith('=-')]
-    if got: found += 1
-    for w in got: ways[w.split('=')[0]] = ways.get(w.split('=')[0], 0) + 1
-summary = '%d of %d stations told what they play. Ways: %s' % (found, len(res), ', '.join('%s %d' % kv for kv in sorted(ways.items(), key=lambda x: -x[1])))
-print(summary)
-body = summary + '\n' + '\n'.join(res)
+ways, lines, none = {}, [], []
+for r in res:
+    got = [w for w in (r['t'] or []) if w['title']]
+    for w in got:
+        k = '%s(%s)' % (w['way'], w['via'])
+        ways[k] = ways.get(k, 0) + 1
+    if got: lines.append('%s: %s' % (r['n'], '; '.join('%s(%s)=%s' % (w['way'], w['via'], w['title'][:50]) for w in got)))
+    else: none.append('%s <%s>' % (r['n'], r['u'][:60]))
+summary = '%d of %d stations told what they play. Ways: %s' % (len(lines), len(res), ', '.join('%s %d' % kv for kv in sorted(ways.items(), key=lambda x: -x[1])))
+body = summary + '\n' + '\n'.join(lines) + '\nNothing from: ' + ' | '.join(none)
+print(body)
 print('::notice title=What stations play::' + body.replace('%', '%25').replace('\r', '').replace('\n', '%0A'))

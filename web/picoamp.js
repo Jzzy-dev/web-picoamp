@@ -592,7 +592,8 @@ async function npGet(url, how) {
     }
     return null;
 }
-const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
+// (a title: text a person reads, not a stream's bytes a relay sent instead)
+const clean = t => { const c = String(t || '').replace(/\s+/g, ' ').trim(); return c.length <= 200 && !/[\u0000-\u0008\u000e-\u001f\ufffd]/.test(c) ? c : ''; };
 function npIcecast(text, u) {
     try {
         const j = JSON.parse(text);
@@ -609,9 +610,8 @@ function npShout2(text) {
     try { const j = JSON.parse(text); return clean(j.songtitle) || null; } catch { return null; }
 }
 function npShout1(text) {
-    const m = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(text);
-    const f = (m ? m[1] : text).split(',');
-    return f.length >= 7 ? clean(f.slice(6).join(',')) || null : null;
+    const m = /<body[^>]*>(\d+,\d,\d+,\d+,\d+,\d+,[\s\S]*?)<\/body>/i.exec(text);
+    return m ? clean(m[1].split(',').slice(6).join(',')) || null : null;
 }
 // a StreamTheWorld stream's mount (RADIO538, KINK_SC ...)
 function tritonMount(url) {
@@ -664,17 +664,17 @@ async function npIcy(url) {
         }
     } catch { return null; } finally { clearTimeout(tm); ac.abort(); }
 }
-// (the tests and the live check: every way for a station, what each gives)
+// (the tests and the live check: every way for a station, what each gives: [{ way, via, title }])
 async function npProbe(url) {
     const out = [];
-    for (const [name, fn] of npWays(url, {})) {
+    for (const [name] of npWays(url, {})) {
         const how = {};
         const w = npWays(url, how).find(x => x[0] === name);
         let t = null;
         try { t = await w[1](); } catch { }
-        out.push(`${name}${how.via ? '(' + how.via + ')' : ''}=${t === null || t === undefined ? '-' : JSON.stringify(t)}`);
+        out.push({ way: name, via: how.via || '', title: t || '' });
     }
-    return out.join(' ');
+    return out;
 }
 function npStart(url) {
     npStop();
