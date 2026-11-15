@@ -37,7 +37,7 @@ jobs:
 
       - name: "Live check: what real stations play (information)"
         continue-on-error: true
-        run: python3 tests/live_np.py
+        run: python3 tests/live_np.py; python3 tests/live_api.py
 
       - name: Screenshots
         if: always()
