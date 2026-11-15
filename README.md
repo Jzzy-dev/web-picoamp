@@ -79,10 +79,17 @@ A web page may only read another site when that site allows it (CORS). This has 
 * **Stations without CORS** still play, but as they are, without spectrum or equalizer. PicoAmp says so
   when it happens. Most stations (Icecast, SomaFM, Radio Paradise and others) do allow it.
 * **http-only stations** cannot be played from an https page. PicoAmp says so.
-* **Song titles of stations** (ICY) cannot be read, so a station shows its name instead.
+* **Song titles of stations** (ICY) are inside the stream, which a page may not read. PicoAmp asks
+  for them beside it, every 20 s, in the first way that answers: the station's own service (Triton
+  Digital's for StreamTheWorld stations such as 538, Radio 10, Veronica; SomaFM; laut.fm; Zeno), its
+  server's status page (Icecast, SHOUTcast), the stream's metadata where the server allows it (the NPO
+  stations, many Icecast stations), and last [onlineradiobox.com](https://onlineradiobox.com)'s now
+  playing, found by the station's name and country (Qmusic, Sky Radio and most big stations). In a live
+  check of the 53 most listened https stations, 32 tell their song this way; the rest show their name.
 * **The news (T)** is not in the web version: most feeds do not allow pages to read them.
 
-A small relay of PicoAmp's own (for example a free Cloudflare Worker) would solve all four. That is the
+A small relay of PicoAmp's own (for example a free Cloudflare Worker) would solve all four
+(`npproxy=` gives the song titles' requests one). That is the
 next step.
 
 ## Build and run

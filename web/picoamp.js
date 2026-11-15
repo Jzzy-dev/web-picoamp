@@ -596,7 +596,8 @@ async function npGet(url, how) {
     return null;
 }
 // (a title: text a person reads, not a stream's bytes a relay sent instead)
-const clean = t => { const c = String(t || '').replace(/\s+/g, ' ').trim(); return c.length <= 200 && !/[\u0000-\u0008\u000e-\u001f\ufffd]/.test(c) ? c : ''; };
+// (and not a station's own numbers for a song: "288527 - 406237")
+const clean = t => { const c = String(t || '').replace(/\s+/g, ' ').trim(); return c.length <= 200 && !/[\u0000-\u0008\u000e-\u001f\ufffd]/.test(c) && !/^[\d\s\-\u2013.]*$/.test(c) ? c : ''; };
 function npIcecast(text, u) {
     try {
         const j = JSON.parse(text);
