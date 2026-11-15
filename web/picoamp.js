@@ -564,25 +564,78 @@ function js_audio_seek(s) { if (cur && !cur.usingPlain) el.currentTime = s; }
 function cErr(msg) { withStr(msg, p => X.web_audio_error(p)); }
 
 // ---------------- what a station plays ----------------
-// the browser's audio element keeps a station's song titles to itself: they are read beside it,
-// every 20 s: the Icecast server's status (status-json.xsl; most allow other pages to read it), else
-// the stream itself for a moment (Icy-MetaData: 1, up to its first title; where the station allows it)
+// the browser's audio element keeps a station's song titles to itself, and most stations let no
+// other page read them: they are asked for beside it, every 20 s, in the first way that answers:
+//   * the server's status: Icecast (status-json.xsl), SHOUTcast 2 (stats?json=1), SHOUTcast 1 (7.html);
+//   * Triton Digital's now-playing service (StreamTheWorld streams: many commercial stations);
+//   * the stream itself for a moment (Icy-MetaData: 1, up to its first title; where it is allowed);
+// each straight from the server, else through a public relay that adds what the browser needs
+// (CORS) and https (npproxy=, empty: none). The relay gets the address it is asked for, nothing else.
+const npProxies = (params.has('npproxy') ? [params.get('npproxy')] :
+    ['https://api.allorigins.win/raw?url=', 'https://corsproxy.io/?url=', 'https://api.codetabs.com/v1/proxy?quest=']).filter(x => x);
 let npTimer = 0, npGen = 0, npLast = '';
 function npStop() { clearTimeout(npTimer); npTimer = 0; npGen++; npLast = ''; }
-async function npStatus(url) {
+function timeout(ms) { return AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined; }
+const insecurePage = () => location.protocol === 'https:';
+// a page's text: straight (when the browser may), else through each relay; null: none answered
+async function npGet(url, how) {
+    const tries = [];
+    if (!(insecurePage() && /^http:/i.test(url))) tries.push(['direct', url]);
+    for (const p of npProxies) tries.push([p, p + encodeURIComponent(url)]);
+    for (const [via, u] of tries) {
+        try {
+            const r = await fetch(u, { signal: timeout(7000), cache: 'no-store' });
+            if (!r.ok) continue;
+            const t = await r.text();
+            if (t && t.length < 512 * 1024) { if (how) how.via = via === 'direct' ? 'direct' : 'relay'; return t; }
+        } catch { }
+    }
+    return null;
+}
+const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
+function npIcecast(text, u) {
     try {
-        const u = new URL(url);
-        const r = await fetch(u.origin + '/status-json.xsl', { signal: AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined });
-        if (!r.ok) return null;
-        const j = await r.json();
+        const j = JSON.parse(text);
         let s = j && j.icestats && j.icestats.source;
         if (!s) return null;
         if (!Array.isArray(s)) s = [s];
         const m = s.find(x => x.listenurl && new URL(x.listenurl, u.origin).pathname === u.pathname) || (s.length === 1 ? s[0] : null);
         if (!m) return null;
         const t = m.artist && m.title ? m.artist + ' - ' + m.title : (m.title || m.yp_currently_playing || '');
-        return t ? String(t) : null;
+        return clean(t) || null;
     } catch { return null; }
+}
+function npShout2(text) {
+    try { const j = JSON.parse(text); return clean(j.songtitle) || null; } catch { return null; }
+}
+function npShout1(text) {
+    const m = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(text);
+    const f = (m ? m[1] : text).split(',');
+    return f.length >= 7 ? clean(f.slice(6).join(',')) || null : null;
+}
+// a StreamTheWorld stream's mount (RADIO538, KINK_SC ...)
+function tritonMount(url) {
+    const m = /streamtheworld\.com\/(?:api\/livestream-redirect\/)?([A-Za-z0-9_]+?)(?:_SC|AAC|\.mp3|\.aac|$|\/)/i.exec(url) ||
+              /streamtheworld\.com\/.*?([A-Z0-9_]{3,})(?:\.mp3|\.aac|AAC)/.exec(url);
+    return m ? m[1] : null;
+}
+function npTriton(text) {
+    const a = /<property name="track_artist_name"><!\[CDATA\[(.*?)\]\]>/.exec(text), t = /<property name="cue_title"><!\[CDATA\[(.*?)\]\]>/.exec(text);
+    if (!t) return null;
+    return clean(a && a[1] ? a[1] + ' - ' + t[1] : t[1]) || null;
+}
+// the ways for a station, best first: [name, function() -> title or null]
+function npWays(url, how) {
+    let u;
+    try { u = new URL(url); } catch { return []; }
+    const ways = [];
+    const mount = tritonMount(url);
+    if (mount) ways.push(['triton', async () => { const t = await npGet(`https://np.tritondigital.com/public/nowplaying?mountName=${mount}&numberToFetch=1&eventType=track`, how); return t && npTriton(t); }]);
+    ways.push(['icecast', async () => { const t = await npGet(u.origin + '/status-json.xsl', how); return t && npIcecast(t, u); }]);
+    ways.push(['icy', async () => { if (insecurePage() && u.protocol === 'http:') return null; how.via = 'direct'; return npIcy(url); }]);
+    ways.push(['shoutcast2', async () => { const sid = u.searchParams.get('sid') || '1'; const t = await npGet(`${u.origin}/stats?sid=${sid}&json=1`, how); return t && npShout2(t); }]);
+    ways.push(['shoutcast1', async () => { const t = await npGet(u.origin + '/7.html', how); return t && npShout1(t); }]);
+    return ways;
 }
 async function npIcy(url) {
     const ac = new AbortController();
@@ -605,22 +658,41 @@ async function npIcy(url) {
                 if (got === need) {
                     const s = new TextDecoder().decode(meta);
                     const m = /StreamTitle='(.*?)';/.exec(s);
-                    return m ? m[1] : '';
+                    return m ? clean(m[1]) : '';
                 }
             }
         }
     } catch { return null; } finally { clearTimeout(tm); ac.abort(); }
 }
+// (the tests and the live check: every way for a station, what each gives)
+async function npProbe(url) {
+    const out = [];
+    for (const [name, fn] of npWays(url, {})) {
+        const how = {};
+        const w = npWays(url, how).find(x => x[0] === name);
+        let t = null;
+        try { t = await w[1](); } catch { }
+        out.push(`${name}${how.via ? '(' + how.via + ')' : ''}=${t === null || t === undefined ? '-' : JSON.stringify(t)}`);
+    }
+    return out.join(' ');
+}
 function npStart(url) {
     npStop();
     const g = npGen;
-    let useIcy = true;
+    let way = null;                     // the way that answered (asked first from then on)
+    let misses = 0;
     const tick = async () => {
-        let t = await npStatus(url);
-        if (g !== npGen) return;
-        if (t === null && useIcy) { t = await npIcy(url); if (g !== npGen) return; if (t === null) useIcy = false; }
+        let t = null;
+        const ways = npWays(url, {});
+        if (way) ways.sort((a, b) => (b[0] === way) - (a[0] === way));
+        for (const [name, fn] of ways) {
+            try { t = await fn(); } catch { t = null; }
+            if (g !== npGen) return;
+            if (t) { way = name; break; }
+        }
         if (t && t !== npLast) { npLast = t; withStr(t, p => X.web_audio_title(p)); }
-        npTimer = setTimeout(tick, 20000);
+        misses = t ? 0 : misses + 1;    // (nothing answers: asked less often)
+        npTimer = setTimeout(tick, misses >= 3 ? 180000 : misses ? 60000 : 20000);
     };
     npTimer = setTimeout(tick, 1500);
 }
@@ -977,7 +1049,7 @@ window.picoamp = {
         const cx = Math.floor(dest.x + (x + 0.5) * dest.w / 256), cy = Math.floor(dest.y + (y + 0.5) * dest.h / 192);
         return Array.from(g2.getImageData(cx, cy, 1, 1).data.slice(0, 3));
     },
-    npIcy,                                // (the tests: a stream's own title)
+    npIcy, npProbe,                       // (the tests: a stream's own title; every way for a station)
     get audio() { return { cur, paused: el.paused, plainPaused: plain.paused, gainL, gainR, eqGains, ctx: ctx && ctx.state }; },
 };
 

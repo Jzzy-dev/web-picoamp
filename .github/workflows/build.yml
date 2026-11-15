@@ -35,6 +35,10 @@ jobs:
         continue-on-error: true
         run: python3 tests/live_web.py && mv live-*.png shots/
 
+      - name: "Live check: what real stations play (information)"
+        continue-on-error: true
+        run: python3 tests/live_np.py
+
       - name: Screenshots
         if: always()
         uses: actions/upload-artifact@v4

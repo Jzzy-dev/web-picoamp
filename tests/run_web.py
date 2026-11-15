@@ -54,7 +54,7 @@ log = open(os.path.join(T, 'svc.log'), 'w')
 svc = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tests', 'web_server.py'), str(SVC_PORT), os.path.join(M, '01 Sine.mp3'), M], stdout=log, stderr=log)
 time.sleep(0.6)
 
-URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi&logoproxy=%s/proxy%%3Furl%%3D&itunes=%s/itunes' % (PAGE_PORT, SVC, SVC, SVC, SVC, SVC, SVC)
+URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi&logoproxy=%s/proxy%%3Furl%%3D&itunes=%s/itunes&npproxy=' % (PAGE_PORT, SVC, SVC, SVC, SVC, SVC, SVC)
 fails = 0
 def check(name, out, pattern):
     global fails
