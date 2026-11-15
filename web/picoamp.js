@@ -566,13 +566,16 @@ function cErr(msg) { withStr(msg, p => X.web_audio_error(p)); }
 // ---------------- what a station plays ----------------
 // the browser's audio element keeps a station's song titles to itself, and most stations let no
 // other page read them: they are asked for beside it, every 20 s, in the first way that answers:
+//   * the station's own service: Triton Digital's now playing (StreamTheWorld streams: many commercial
+//     stations), SomaFM's, laut.fm's, Zeno's;
 //   * the server's status: Icecast (status-json.xsl), SHOUTcast 2 (stats?json=1), SHOUTcast 1 (7.html);
-//   * Triton Digital's now-playing service (StreamTheWorld streams: many commercial stations);
 //   * the stream itself for a moment (Icy-MetaData: 1, up to its first title; where it is allowed);
-// each straight from the server, else through a public relay that adds what the browser needs
-// (CORS) and https (npproxy=, empty: none). The relay gets the address it is asked for, nothing else.
-const npProxies = (params.has('npproxy') ? [params.get('npproxy')] :
-    ['https://api.allorigins.win/raw?url=', 'https://corsproxy.io/?url=', 'https://api.codetabs.com/v1/proxy?quest=']).filter(x => x);
+//   * last, onlineradiobox.com's now playing, by the station's name and country (Radio Browser's): it
+//     lists most stations of the world, and lets other pages read it.
+// (A relay that adds CORS can be given: npproxy=https://...?url= ; the status pages go through it too.)
+const npProxies = (params.get('npproxy') || '').split(' ').filter(x => x);
+const npRb = params.get('rb') || 'https://all.api.radio-browser.info';
+const npStations = new Map();           // a stream's address -> its name and country (Radio Browser), or null
 let npTimer = 0, npGen = 0, npLast = '';
 function npStop() { clearTimeout(npTimer); npTimer = 0; npGen++; npLast = ''; }
 function timeout(ms) { return AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined; }
@@ -624,6 +627,61 @@ function npTriton(text) {
     if (!t) return null;
     return clean(a && a[1] ? a[1] + ' - ' + t[1] : t[1]) || null;
 }
+// a JSON's fields
+async function npJson(url, how) { const t = await npGet(url, how); try { return t ? JSON.parse(t) : null; } catch { return null; } }
+// Zeno: its server-sent events, the first one
+async function npZeno(mount) {
+    const ac = new AbortController();
+    const tm = setTimeout(() => ac.abort(), 8000);
+    try {
+        const r = await fetch(`https://api.zeno.fm/mounts/metadata/subscribe/${mount}`, { signal: ac.signal, cache: 'no-store' });
+        if (!r.ok || !r.body) return null;
+        const rd = r.body.getReader(), dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+            const { value, done } = await rd.read();
+            if (done) return null;
+            buf += dec.decode(value, { stream: true });
+            const m = /^data:(.*)$/m.exec(buf);
+            if (m) { try { return clean(JSON.parse(m[1]).streamTitle) || null; } catch { return null; } }
+            if (buf.length > 65536) return null;
+        }
+    } catch { return null; } finally { clearTimeout(tm); ac.abort(); }
+}
+// onlineradiobox's names for a station: its name in a few forms ("538 Radio": 538radio, 538)
+function orbAliases(name) {
+    let n = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    n = n.replace(/\(.*?\)|\[.*?\]|\|.*$| - .*$/g, '').trim();
+    const w = n.match(/[a-z0-9]+/g) || [];
+    const all = w.join('');
+    const out = [all, all.replace(/^radio/, ''), all.replace(/radio$/, ''),
+                 w.filter(x => !['radio', 'fm', 'hd', 'hq', 'mp3', 'aac', 'flac', 'live', 'stream', 'online'].includes(x)).join(''), w.join('-')];
+    return [...new Set(out.filter(x => x.length >= 2))];
+}
+async function npStation(url) {
+    if (npStations.has(url)) return npStations.get(url);
+    let st = null;
+    try {
+        const r = await fetch(npRb + '/json/stations/byurl?url=' + encodeURIComponent(url), { signal: timeout(8000) });
+        const j = r.ok ? await r.json() : null;
+        if (Array.isArray(j) && j[0] && j[0].countrycode) st = { name: j[0].name, cc: j[0].countrycode.toLowerCase(), alias: null };
+    } catch { }
+    npStations.set(url, st);
+    return st;
+}
+async function npOrb(url, how) {
+    const st = await npStation(url);
+    if (!st) return null;
+    for (const a of st.alias ? [st.alias] : orbAliases(st.name)) {
+        try {
+            const r = await fetch(`https://scraper2.onlineradiobox.com/${st.cc}.${a}`, { signal: timeout(7000), cache: 'no-store' });
+            const j = r.ok ? await r.json() : null;
+            const t = j && clean(j.title);
+            if (t) { st.alias = a; how.via = `${st.cc}.${a}`; return t; }
+        } catch { }
+    }
+    return null;
+}
 // the ways for a station, best first: [name, function() -> title or null]
 function npWays(url, how) {
     let u;
@@ -631,10 +689,23 @@ function npWays(url, how) {
     const ways = [];
     const mount = tritonMount(url);
     if (mount) ways.push(['triton', async () => { const t = await npGet(`https://np.tritondigital.com/public/nowplaying?mountName=${mount}&numberToFetch=1&eventType=track`, how); return t && npTriton(t); }]);
+    if (/(^|\.)somafm\.com$/i.test(u.hostname)) {
+        const ch = u.pathname.split('/')[1].replace(/-\d+-(mp3|aac|aacp)$/i, '').replace(/\d+$/, '');
+        if (ch) ways.push(['somafm', async () => { const j = await npJson(`https://somafm.com/songs/${ch}.json`, how); const x = j && j.songs && j.songs[0]; return x ? clean((x.artist ? x.artist + ' - ' : '') + x.title) || null : null; }]);
+    }
+    if (/\.stream\.laut\.fm$/i.test(u.hostname)) {
+        const name = u.pathname.split('/')[1];
+        if (name) ways.push(['lautfm', async () => { const j = await npJson(`https://api.laut.fm/station/${name}/current_song`, how); return j && j.title ? clean((j.artist && j.artist.name ? j.artist.name + ' - ' : '') + j.title) || null : null; }]);
+    }
+    if (/^stream\.zeno\.fm$/i.test(u.hostname)) {
+        const m = u.pathname.split('/')[1];
+        if (m) ways.push(['zeno', async () => { how.via = 'direct'; return npZeno(m); }]);
+    }
     ways.push(['icecast', async () => { const t = await npGet(u.origin + '/status-json.xsl', how); return t && npIcecast(t, u); }]);
     ways.push(['icy', async () => { if (insecurePage() && u.protocol === 'http:') return null; how.via = 'direct'; return npIcy(url); }]);
     ways.push(['shoutcast2', async () => { const sid = u.searchParams.get('sid') || '1'; const t = await npGet(`${u.origin}/stats?sid=${sid}&json=1`, how); return t && npShout2(t); }]);
     ways.push(['shoutcast1', async () => { const t = await npGet(u.origin + '/7.html', how); return t && npShout1(t); }]);
+    ways.push(['onlineradiobox', async () => npOrb(url, how)]);
     return ways;
 }
 async function npIcy(url) {
