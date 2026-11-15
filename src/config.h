@@ -40,6 +40,13 @@ typedef struct
     char   alarm_name[256];
     // [news]
     bool   news_by_feed;     // the feed's order (else newest first)
+    // [cover]
+    bool   cover_rows;       // five colours of its own for every row of the cover's cells (else for all)
+    // [pictures]
+    int    pic_saver;        // the screensaver after this many minutes without a key (0: off)
+    int    pic_interval;     // seconds a picture shows in a slideshow
+    bool   pic_shuffle;
+    char   pic_folder[1024]; // the screensaver's folder ("": the Pictures folder)
 } config;
 
 extern config cfg;

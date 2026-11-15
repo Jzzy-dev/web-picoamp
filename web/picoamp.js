@@ -137,7 +137,7 @@ async function restoreMusic() {
     } catch { }
 }
 
-function pickWithInput() {
+function pickWithInput(dflt) {
     return new Promise(ok => {
         const inp = document.createElement('input');
         inp.type = 'file';
@@ -150,8 +150,8 @@ function pickWithInput() {
             done = true;
             const files = [...inp.files];
             inp.remove();
-            if (!files.length) { ok(false); return; }
-            const root = { name: files[0].webkitRelativePath.split('/')[0] || 'Music', kind: 'dir', children: new Map() };
+            if (!files.length) { ok(null); return; }
+            const root = { name: files[0].webkitRelativePath.split('/')[0] || dflt || 'Music', kind: 'dir', children: new Map() };
             for (const f of files) {
                 const parts = f.webkitRelativePath.split('/').slice(1);
                 let d = root;
@@ -161,10 +161,9 @@ function pickWithInput() {
                 }
                 d.children.set(parts[parts.length - 1], { name: parts[parts.length - 1], kind: 'file', file: f });
             }
-            music = { name: root.name, tree: root };
-            ok(true);
+            ok({ name: root.name, tree: root });
         };
-        inp.addEventListener('cancel', () => { if (!done) { inp.remove(); ok(false); } });
+        inp.addEventListener('cancel', () => { if (!done) { inp.remove(); ok(null); } });
         inp.click();
     });
 }
@@ -174,20 +173,21 @@ function js_music_pick() {
         musicPick = window.showDirectoryPicker({ id: 'picoamp-music', mode: 'read', startIn: 'music' })
             .then(async h => { music = { name: h.name, handle: h }; await idbSet('music', h).catch(() => { }); return true; })
             .catch(() => false);
-    } else musicPick = pickWithInput();
+    } else musicPick = pickWithInput('Music').then(root => { if (root) music = root; return !!root; });
 }
 
-async function musicDir(path) {
-    if (!music) throw new Error('No music folder chosen');
+async function musicDir(path) { return rootDir(music, path, 'music'); }
+async function rootDir(root, path, what) {
+    if (!root) throw new Error(`No ${what} folder chosen`);
     const parts = path ? path.split('/') : [];
-    if (music.tree) {
-        let d = music.tree;
+    if (root.tree) {
+        let d = root.tree;
         for (const p of parts) { d = d.children.get(p); if (!d || d.kind !== 'dir') throw new Error('Folder not found'); }
         return { list: async () => [...d.children.values()].map(c => [c.kind === 'dir' ? 'd' : 'f', c.name]) };
     }
-    const h0 = music.handle;
+    const h0 = root.handle;
     if (h0.queryPermission && (await h0.queryPermission({ mode: 'read' })) !== 'granted') {
-        if ((await h0.requestPermission({ mode: 'read' })) !== 'granted') throw new Error('The music folder may not be read');
+        if ((await h0.requestPermission({ mode: 'read' })) !== 'granted') throw new Error(`The ${what} folder may not be read`);
     }
     let h = h0;
     for (const p of parts) h = await h.getDirectoryHandle(p);
@@ -235,6 +235,79 @@ function js_music_list(id, p, n) {
 }
 
 function js_music_name(out, max) { return music ? writeOut(music.name, out, max) : 0; }
+
+// ---------------- the pictures' folder (I), picked apart from the music's ----------------
+let pics = null;               // { name, handle } or { name, tree }
+let picsPick = null;
+async function restorePics() {
+    try {
+        const h = await idbGet('pictures');
+        if (h && h.kind === 'directory') pics = { name: h.name, handle: h };
+    } catch { }
+}
+function js_pics_pick() {
+    if (window.showDirectoryPicker) {
+        picsPick = window.showDirectoryPicker({ id: 'picoamp-pictures', mode: 'read', startIn: 'pictures' })
+            .then(async h => { pics = { name: h.name, handle: h }; await idbSet('pictures', h).catch(() => { }); return true; })
+            .catch(() => false);
+    } else picsPick = pickWithInput('Pictures').then(root => { if (root) pics = root; return !!root; });
+}
+function js_pics_list(id, p, n) {
+    const path = str(p, n);
+    const pick = picsPick;
+    (async () => {
+        if (pick) { const ok = await pick; if (picsPick === pick) picsPick = null; if (!ok && !pics) throw new Error('No folder chosen'); }
+        const items = await (await rootDir(pics, path, 'pictures')).list();
+        return items.filter(([, nm]) => !nm.startsWith('.')).map(([k, nm]) => `${k} ${nm}`).join('\n');
+    })().then(text => withStr(text, p2 => X.dir_done(id, p2, 1)),
+              e => withStr(String(e.message || e), p2 => X.dir_done(id, p2, 0)));
+}
+function js_pics_name(out, max) { return pics ? writeOut(pics.name, out, max) : 0; }
+async function picsFile(path) {
+    const parts = path.split('/');
+    const name = parts.pop();
+    if (!pics) throw new Error('No pictures folder');
+    if (pics.tree) {
+        let d = pics.tree;
+        for (const p of parts) d = d && d.children.get(p);
+        const f = d && d.children.get(name);
+        if (!f) throw new Error('File not found');
+        return f.file;
+    }
+    let h = pics.handle;
+    for (const p of parts) h = await h.getDirectoryHandle(p);
+    return (await h.getFileHandle(name)).getFile();
+}
+// a picture decoded by the browser, made at most mw x mh (its shape kept; transparent parts black):
+// the RGB rows to the program (web_pic_rgb; w 0: it could not)
+async function picToProgram(id, blob, mw, mh) {
+    let w = 0, h = 0, rgb = null;
+    try {
+        const bm = await createImageBitmap(blob);
+        const k = Math.min(1, mw / bm.width, mh / bm.height);
+        w = Math.max(1, Math.round(bm.width * k)); h = Math.max(1, Math.round(bm.height * k));
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const cx = c.getContext('2d');
+        cx.fillStyle = '#000';
+        cx.fillRect(0, 0, w, h);
+        cx.imageSmoothingQuality = 'high';
+        cx.drawImage(bm, 0, 0, w, h);
+        const d = cx.getImageData(0, 0, w, h).data;
+        rgb = new Uint8Array(w * h * 3);
+        for (let i = 0, j = 0; i < d.length; i += 4, j += 3) { rgb[j] = d[i]; rgb[j + 1] = d[i + 1]; rgb[j + 2] = d[i + 2]; }
+    } catch { w = h = 0; rgb = null; }
+    if (!rgb) { X.web_pic_rgb(id, 0, 0, 0); return; }
+    const [q] = put(rgb);
+    try { X.web_pic_rgb(id, w, h, q); } finally { X.web_free(q); }
+}
+function js_pic_file(id, p, n, mw, mh) {
+    const path = str(p, n);
+    picsFile(path).then(f => picToProgram(id, f, mw, mh), () => X.web_pic_rgb(id, 0, 0, 0));
+}
+function js_pic_bytes(id, p, n, mw, mh) {
+    picToProgram(id, new Blob([u8().slice(p, p + n)]), mw, mh);
+}
 
 // ---------------- covers ----------------
 // an image in the track's folder (as the MSX engine looks): cover, folder, front, album, albumart,
@@ -387,7 +460,7 @@ function js_song_cover(ap, an, wp, wn, album) {
         const j = await itunes(term, album);
         if (tok !== songTok) return;
         let art = (j && Array.isArray(j.results) && j.results[0] && j.results[0].artworkUrl100) || '';
-        art = art.replace('100x100bb', '300x300bb');
+        art = art.replace('100x100bb', '600x600bb');   // (600: the full screen cover too)
         let img = null, known = !!j;
         if (art) {
             img = await getBytes(art);
@@ -708,27 +781,13 @@ function computeDest(cw, ch, scale) {
 }
 
 function draw() {
-    const w = X.web_width(), h = X.web_height(), stride = X.web_fb_stride();
-    const fb = new Uint8Array(mem.buffer, X.web_fb(), stride * h);
-    const pal = new Uint32Array(mem.buffer, X.web_palette(), 16);
+    const w = X.web_width(), h = X.web_height();
     if (!img || img.width !== w || img.height !== h) {
         img = sctx.createImageData(w, h);
         small.width = w; small.height = h;
     }
-    const px = new Uint32Array(img.data.buffer);
-    const lut = new Uint32Array(16), blut = new Uint32Array(16);
-    const bpal = new Uint32Array(mem.buffer, X.web_band_palette(), 16);
-    for (let i = 0; i < 16; i++) {
-        const c = pal[i], b = bpal[i];
-        lut[i] = 0xFF000000 | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16 & 0xFF);
-        blut[i] = 0xFF000000 | (b & 0xFF) << 16 | (b & 0xFF00) | (b >> 16 & 0xFF);
-    }
-    // (the cover view: its lines in the cover's palette, as the MSX's line interrupt)
-    const by0 = X.web_band_y0(), by1 = X.web_band_y1();
-    for (let y = 0; y < h; y++) {
-        const r = y * stride, o = y * w, l = y >= by0 && y < by1 ? blut : lut;
-        for (let x = 0; x < w; x++) px[o + x] = l[fb[r + x] & 15];
-    }
+    // the program makes the pixels (the palette, the cover's band and its rows' colours, SCREEN 8)
+    new Uint32Array(img.data.buffer).set(new Uint32Array(mem.buffer, X.web_rgb(), w * h));
     sctx.putImageData(img, 0, 0);
 
     computeDest(canvas.width, canvas.height, X.web_cfg_scale());
@@ -743,7 +802,8 @@ function draw() {
         bctx.fillStyle = 'rgba(0,0,0,0.25)';
         for (let y = 0; y < h; y++) bctx.fillRect(0, y * ky + ky - d, w * kx, d);
     }
-    const back = pal[14];
+    // (around the picture: the border's colour, navy; black around SCREEN 8's pictures)
+    const back = X.web_s8() ? 0 : new Uint32Array(mem.buffer, X.web_palette(), 16)[14];
     g2.fillStyle = `rgb(${back >> 16 & 255},${back >> 8 & 255},${back & 255})`;
     g2.fillRect(0, 0, canvas.width, canvas.height);
     const exact = dest.w === w * kx && dest.h === h * ky;
@@ -937,6 +997,7 @@ function loop() {
 async function start() {
     resize();
     await restoreMusic();
+    await restorePics();
     const imports = {
         wasi_snapshot_preview1: wasi,
         env: {
@@ -949,6 +1010,7 @@ async function start() {
             js_fs_write: (p, n, buf, len) => fsSet(str(p, n), str(buf, len)) ? len : -1,
             js_fs_list: (p, n, out, max) => { const l = fsList(str(p, n)); return l === null ? -1 : writeOut(l.join('\n'), out, max); },
             js_fetch, js_music_pick, js_music_list, js_music_name,
+            js_pics_pick, js_pics_list, js_pics_name, js_pic_file, js_pic_bytes,
             js_audio_play, js_audio_pause, js_audio_stop, js_audio_seek, js_audio_gain, js_audio_eq, js_audio_meta,
             js_can_play, js_open_lists, js_fullscreen: toggleFullscreen, js_decode_image, js_station_logo, js_song_cover,
             js_geolocate: () => { },

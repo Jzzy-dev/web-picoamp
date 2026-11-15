@@ -32,6 +32,15 @@ ff('-f', 'lavfi', '-i', "aevalsrc='%s':s=44100:d=10" % E, '-i', os.path.join(T, 
    '-c:a', 'libmp3lame', '-b:a', '128k', '-c:v', 'copy', '-id3v2_version', '3', '-metadata', 'title=Tagged',
    '-metadata:s:v', 'comment=Cover (front)', os.path.join(M, 'Album', 'Tagged.mp3'))
 
+# the pictures (I): a big JPEG, a PNG (the browser decodes it), a tall one, a folder
+P = os.path.join(T, 'Pictures')
+os.makedirs(os.path.join(P, 'Holiday'))
+ff('-f', 'lavfi', '-i', 'testsrc=size=1600x1200:rate=1', '-frames:v', '1', '-pix_fmt', 'yuvj420p', os.path.join(P, 'a.jpg'))
+ff('-f', 'lavfi', '-i', 'smptebars=size=640x480:rate=1', '-frames:v', '1', os.path.join(P, 'b.png'))
+ff('-f', 'lavfi', '-i', 'testsrc=size=300x900:rate=1', '-frames:v', '1', '-pix_fmt', 'yuvj420p', os.path.join(P, 'c.jpg'))
+ff('-f', 'lavfi', '-i', 'color=c=0xE02010:s=300x300', '-frames:v', '1', '-pix_fmt', 'yuvj420p', os.path.join(P, 'Holiday', 'd.jpg'))
+open(os.path.join(P, 'notes.txt'), 'w').write('text')
+
 # the page (one origin) and the services (another)
 class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -293,6 +302,41 @@ try:
       check('weather: the days', out, r'2026-11-08 Sun code=71 max=31 min=-62 rain=65%')
       out = run('key C; key T; wait 50; page; key T')
       check('news: says it is not here yet', out, r'news: not in the web version')
+
+      # the pictures (I): a folder picked, its folders and pictures, one in SCREEN 8, the next (a PNG), the slideshow
+      out = run('key Esc; key I; wait 100; page')
+      check('pictures: no folder yet', out, r"pictures browse folder='' entries=1 folders=1 pictures=0")
+      with page.expect_file_chooser() as fc:
+          page.keyboard.press('Enter')
+      fc.value.set_files(P)
+      time.sleep(0.6)
+      out = run('wait 300; page')
+      check('pictures: the folder (pictures and folders only)', out, r"pictures browse folder='' entries=5 folders=2 pictures=3")
+      out = run('key Down; key Down; key Enter; wait 1500; page')
+      shot('picture')
+      check('pictures: one shows', out, r'pictures view .*shown=2 have=1')
+      dots = page.evaluate('''() => { const c = document.getElementById("screen"), g = c.getContext("2d");
+        const d = g.getImageData(0, 0, c.width, c.height).data, s = new Set();
+        for (let i = 0; i < d.length; i += 4 * 97) s.add(d[i] << 16 | d[i + 1] << 8 | d[i + 2]); return s.size; }''')
+      check('pictures: in many colours (SCREEN 8)', str(dots), r'^([3-9]\d|\d{3,})$')
+      out = run('key Right; wait 1500; page; key x; key Home; key Down; key Enter; wait 300; page; key BS; wait 300; key R; key R; key R; key R; key G; wait 1500; page; wait 5800; page; key x')
+      check('pictures: a PNG (the browser decodes it)', out, r'pictures view .*shown=3 have=1')
+      check('pictures: a folder', out, r"pictures browse folder='Holiday' entries=1 folders=0 pictures=1")
+      check('pictures: the slideshow', out, r'pictures slideshow .*shown=2 have=1')
+      check('pictures: the slideshow goes on', out, r'pictures slideshow .*shown=[34] have=1')
+      # the screensaver: a minute without a key on the player's screen; a key: back
+      out = run('key O; key Esc; wait 59000; page; wait 3000; page; key x; page')
+      check('screensaver: after a minute', out, r'pictures screensaver .*have=1')
+      check('screensaver: a key, back to the player', out.strip().split('\n')[-1], r'^page 0')
+      out = run('key I; key O; key O; key O; key O; key O; key O; key Esc')
+      # the cover big (Z, Left: COVER): the station's logo (green), in SCREEN 8 (black beside it)
+      out = run('key Esc; key Z; key Left; wait 800; page')
+      shot('fullcover')
+      px = page.evaluate('''() => { const c = document.getElementById("screen"), g = c.getContext("2d");
+        const m = g.getImageData(c.width >> 1, c.height >> 1, 1, 1).data, e = g.getImageData(c.width * 0.05 | 0, c.height >> 1, 1, 1).data;
+        return [m[0], m[1], m[2], e[0], e[1], e[2]].join(","); }''')
+      check('the cover big (SCREEN 8): the logo, black beside it', px, r'^\d{1,2},(1[5-9]\d|2\d\d),\d{1,3},0,0,0$')
+      run('key Z')
 
       # the codecs the browser plays
       codecs = page.evaluate('''() => ["MP3","AAC","OGG","OPUS","FLAC"].map(c => c + "=" + (new Audio().canPlayType({MP3:"audio/mpeg",AAC:"audio/aac",OGG:"audio/ogg; codecs=\\"vorbis\\"",OPUS:"audio/ogg; codecs=\\"opus\\"",FLAC:"audio/flac"}[c]) || "no")).join(" ")''')

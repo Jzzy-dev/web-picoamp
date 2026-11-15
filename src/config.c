@@ -22,6 +22,8 @@ static void defaults(void)
     cfg.loc_ip = true;
     cfg.alarm_h = 7;
     cfg.alarm_m = 30;
+    cfg.cover_rows = true;
+    cfg.pic_interval = 10;
 }
 
 static const char *ini_path(void)
@@ -98,12 +100,19 @@ void config_load(void)
         else if (!u_stricmp(k, "alarm_play")) u_copy(cfg.alarm_play, sizeof cfg.alarm_play, v);
         else if (!u_stricmp(k, "alarm_name")) u_copy(cfg.alarm_name, sizeof cfg.alarm_name, v);
         else if (!u_stricmp(k, "sort")) cfg.news_by_feed = !u_stricmp(v, "feed");
+        else if (!u_stricmp(k, "rows")) cfg.cover_rows = yes(v);
+        else if (!u_stricmp(k, "saver")) cfg.pic_saver = atoi(v);
+        else if (!u_stricmp(k, "interval")) cfg.pic_interval = atoi(v);
+        else if (!u_stricmp(k, "pictures_shuffle")) cfg.pic_shuffle = yes(v);
+        else if (!u_stricmp(k, "pictures")) u_copy(cfg.pic_folder, sizeof cfg.pic_folder, v);
     }
     free(text);
     if (cfg.volume < 0) cfg.volume = 0;
     if (cfg.volume > 100) cfg.volume = 100;
     if (cfg.win_w < 256 || cfg.win_h < 192) { cfg.win_w = 768; cfg.win_h = 576; }
     if (!cfg.loc_ip && !cfg.loc_name[0]) cfg.loc_ip = true;
+    if (cfg.pic_saver < 0 || cfg.pic_saver > 240) cfg.pic_saver = 0;
+    if (cfg.pic_interval < 2 || cfg.pic_interval > 3600) cfg.pic_interval = 10;
     if (cfg.alarm_h < 0 || cfg.alarm_h > 23 || cfg.alarm_m < 0 || cfg.alarm_m > 59) cfg.alarm_on = false;
 }
 
@@ -142,7 +151,14 @@ void config_save(void)
         "alarm = %s\r\nalarm_time = %02d:%02d\r\nalarm_days = %s\r\nalarm_play = %s\r\nalarm_name = %s\r\n"
         "[news]\r\n"
         "; My feeds are in MyFeeds.opml (beside this file); sort: date (newest first) or feed\r\n"
-        "sort = %s\r\n",
+        "sort = %s\r\n"
+        "[cover]\r\n"
+        "; rows: five colours of its own for every row of the cover's cells (as the MSX); off: five for all of it\r\n"
+        "rows = %s\r\n"
+        "[pictures]\r\n"
+        "; saver: the slideshow after this many minutes without a key (0: off); interval: seconds a picture;\r\n"
+        "; pictures: the screensaver's folder (empty: the Pictures folder)\r\n"
+        "saver = %d\r\ninterval = %d\r\npictures_shuffle = %s\r\npictures = %s\r\n",
         cfg.volume, (cfg.mode & 1) ? "yes" : "no", (cfg.mode & 2) ? "yes" : "no",
         cfg.eq[0], cfg.eq[1], cfg.eq[2], cfg.eq[3], cfg.eq[4], cfg.balance,
         cfg.view == 1 ? "scope" : cfg.view == 2 ? "cover" : "spectrum", cfg.music_dir, cfg.start_path,
@@ -154,6 +170,7 @@ void config_save(void)
         cfg.clock_spectrum ? "on" : "off",
         cfg.loc_ip ? "ip" : "place", cfg.loc_name, cfg.loc_lat, cfg.loc_lon,
         cfg.alarm_on ? "on" : "off", cfg.alarm_h, cfg.alarm_m, cfg.alarm_weekdays ? "weekdays" : "daily",
-        cfg.alarm_play, cfg.alarm_name, cfg.news_by_feed ? "feed" : "date");
+        cfg.alarm_play, cfg.alarm_name, cfg.news_by_feed ? "feed" : "date",
+        cfg.cover_rows ? "on" : "off", cfg.pic_saver, cfg.pic_interval, cfg.pic_shuffle ? "yes" : "no", cfg.pic_folder);
     if (n > 0) sys_write_file(ini_path(), buf, (size_t)n);
 }

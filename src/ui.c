@@ -163,6 +163,7 @@ static bool         is_loading, loading_more;
 static char         loading_select[2048];
 static int          loading_sel;           // ("More stations...": stay where we were)
 static bool         searching;             // / or J: the search line
+static uint32_t     last_input;            // the last key or click (the screensaver counts from it)
 static char         search_text[64];
 
 static void take_list(lib_list *nl, const char *select_target)
@@ -651,6 +652,7 @@ static void draw_cover(void)
                     for (int x = 0; x < 8; x++) d[x] = (p & (0x80 >> x)) ? fg : bg;
                 }
         gfx_band(48, 128, c);
+        gfx_band_rows(c + PVA_COVER_SIZE);  // (and its own colours for each row of cells)
     }
     else if (cover_state() != COVER_MAKING) gfx_str(10, 2, "NO COVER", 8, COL(GREY, NAVY));
     for (int k = 0; k < 12; k++)
@@ -855,7 +857,7 @@ static void draw_help(void)
         { A_NORM, "C          clock      W      weather" },
         { A_NORM, "T          news       / J    search" },
         { A_NORM, "F          favourite+ D, DEL favourite-" },
-        { A_NORM, "Ctrl+Up/Down  move a favourite" },
+        { A_NORM, "I          pictures   Ctrl+Up/Down fav" },
         { A_NORM, "O          edit the station lists" },
         { A_NORM, "? or F1    this help (or click the ?)" },
         { COL(CYAN, NAVY), "Page: F11, Alt+Enter or a double click" },
@@ -891,7 +893,7 @@ static void draw_help(void)
 }
 
 // ---------------- pages ----------------
-static const page_t *const pages[PG_COUNT] = { NULL, &page_full, &page_clock, &page_wx, &page_news };
+static const page_t *const pages[PG_COUNT] = { NULL, &page_full, &page_clock, &page_wx, &page_news, &page_pics };
 
 int ui_page_now(void) { return page; }
 
@@ -939,8 +941,18 @@ void ui_frame(void)
         if (st.error[0]) ui_message(st.error, true);
     }
     gfx_band(0, 0, NULL);               // (the cover view sets it again)
+    gfx_s8_on = false;                  // (the pictures and the full screen cover set it again)
     if (help_on) { gfx_set_size(GFX_W, GFX_H); draw_help(); return; }
-    if (page != PG_PLAYER) { pages[page]->frame(); return; }
+    if (page != PG_PLAYER) { pages[page]->frame(); last_input = page == PG_PICS ? last_input : sys_millis(); return; }
+    // the screensaver: the pictures' slideshow after [pictures] saver minutes without a key, on the player's
+    // own screen (not on a page, the equalizer, a search)
+    if (!last_input) last_input = sys_millis();
+    if (cfg.pic_saver && !eq_open && !searching && sys_millis() - last_input >= (uint32_t)cfg.pic_saver * 60000u)
+    {
+        last_input = sys_millis();
+        pics_saver();
+        if (page != PG_PLAYER) { pages[page]->frame(); return; }
+    }
     for (int i = 0; i < 3; i++) tickers[i]->shown = false;
     draw_static();
     draw_info();
@@ -1004,6 +1016,7 @@ bool ui_playback_key(int k)
 
 void ui_key(int k)
 {
+    last_input = sys_millis();
     if (k == K_F1) { help_on = !help_on; return; }
     if (help_on) { help_on = false; return; }
     if (page != PG_PLAYER) { pages[page]->key(k); return; }
@@ -1061,6 +1074,7 @@ void ui_key(int k)
     case 'C': ui_page(PG_CLOCK); return;
     case 'W': ui_page(PG_WX); return;
     case 'T': ui_page(PG_NEWS); return;
+    case 'I': ui_page(PG_PICS); return;
     case 'F': fav_add(); return;
     case 'D': case K_DEL: fav_del(); return;
     case K_CTRL_UP: case K_CTRL_DOWN:
@@ -1085,6 +1099,7 @@ void ui_key(int k)
 
 void ui_mouse(int x, int y, int button)
 {
+    if (button != MOUSE_UP) last_input = sys_millis();
     if (help_on) { if (button == MOUSE_LEFT || button == MOUSE_RIGHT) help_on = false; return; }
     if (page != PG_PLAYER) { if (pages[page]->mouse) pages[page]->mouse(x, y, button); return; }
     if (button == MOUSE_UP) { eq_drag = -1; return; }

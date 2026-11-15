@@ -12,8 +12,8 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
 | Playing | Internet radio: search | Equalizer (G) |
 |---|---|---|
 | ![Playing](docs/spectrum.png) | ![Search](docs/directory.png) | ![Equalizer](docs/equalizer.png) |
-| **Clock (C)** | **Weather (W)** | |
-| ![Clock](docs/clock.png) | ![Weather](docs/weather.png) | |
+| **Clock (C)** | **Weather (W)** | **A picture (I)** |
+| ![Clock](docs/clock.png) | ![Weather](docs/weather.png) | ![A picture](docs/picture.png) |
 
 *(The screenshots come from the tests, with their test music, stations and places.)*
 
@@ -30,7 +30,11 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
   presets (E) and the full-screen pictures (Z). The analyser and equalizer are the PicoVerse Audio
   Engine's code; the equalizer's five bands are the browser's own filters.
 * **The cover (V a third time),** as PICOAMP on the MSX shows it: 80×80 pixels in MSX SCREEN 4 cells
-  (two colours in every 8 pixels of a row) with five palette entries of its own, 12 bars beside it.
+  (two colours in every 8 pixels of a row) with five palette entries of its own for each row of cells
+  (as the MSX with engine 0.17; `rows = off` in the settings: five for all of it), 12 bars beside it.
+  **Z** then **Cover** shows it big in MSX SCREEN 8 (256 × 192, 256 colours, dithered), as the MSX
+  does: the track's own picture, the folder's, the one from the internet (iTunes covers at 600 × 600),
+  the default pictures whole.
   It comes from the track's tag (MP3, FLAC), else from `cover`, `folder`, `front`, `album`,
   `albumart` or `AlbumArtSmall` (`.jpg`, `.jpeg`, `.png`) in its folder.
   A station shows its logo, found as the MSX engine finds it. Radio Browser is asked for the station
@@ -44,6 +48,17 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
   A song's cover shows over the station's logo; a song without one shows the logo again. When
   nothing has a cover, one of three default pictures shows (Copacabana, New York, Amsterdam), a new
   one at random for each track or station.
+* **Pictures (I):** pick a folder of pictures (Chrome and Edge remember it, as the music folder); its
+  folders and pictures (anything the browser shows: JPEG, PNG, GIF, WebP, AVIF ...).
+  * Enter shows one in MSX SCREEN 8 (256 × 192, 256 colours, fitted with the MSX's dot shape and
+    dithered); Left/Right the one before or after, Space marks it, any other key goes back.
+  * Space marks pictures (A all); **G** plays the marked ones, or all of the folder, as a slideshow.
+  * **O** sets the screensaver (off, 1, 2, 5, 10, 15 or 30 minutes), **R** how long a picture shows
+    (5 to 60 s), **U** shuffle, **F** makes this folder the screensaver's. "Choose another folder..." at
+    the top picks another one.
+  * The screensaver plays that folder's slideshow after the minutes without a key or a click, while the
+    player shows; any key goes back. It needs the folder: in Chrome and Edge after a reload too (once
+    the browser may read it again), in other browsers once it was picked in this visit.
 * **Clock (C)** with sleep timer and alarm, and **Weather (W)** for the place of your internet connection
   ([GeoJS](https://www.geojs.io)) or a place found by name, from [Open-Meteo](https://open-meteo.com).
   * The alarm and sleep timer only work while the page is open (in a background tab is fine).

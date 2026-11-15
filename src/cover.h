@@ -26,8 +26,10 @@ bool cover_find_in_tag(const uint8_t *b, size_t n, size_t *off, size_t *len);
 
 int cover_state(void);                  // COVER_xxx
 unsigned cover_gen(void);               // +1 when it changes
-// COVER_READY: palette (32 bytes), 800 pattern bytes, 800 colour bytes (pva_cover.h)
+// COVER_READY: palette (32 bytes), 800 pattern bytes, 800 colour bytes, the rows' palettes (pva_cover.h)
 const uint8_t *cover_data(void);
+// the bytes of the picture that shows (for a bigger picture of it); false: none
+bool cover_source(const uint8_t **data, size_t *len);
 
 // the platform: decode what TJpgDec cannot (PNG, progressive JPEG ...); false: it cannot either
 // (on the web it says yes and gives the pixels later, through cover_from_rgb)

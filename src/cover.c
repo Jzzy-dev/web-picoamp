@@ -10,9 +10,12 @@
 #include "gfx.h"
 #include "sys.h"
 #include "util.h"
+#include "config.h"
 
 static pva_cover_t *cv;
-static uint8_t out[PVA_COVER_SIZE];
+static uint8_t out[PVA_COVER_FULL];   // (with a palette for every row of cells, as the MSX: pva_cover.h)
+static uint8_t *src;                    // the picture's bytes (for the full screen cover: bigger)
+static size_t   src_len;
 static int state = COVER_NONE;
 static unsigned gen;
 static char key[2200];                  // where the picture came from (a folder's image: once for its tracks)
@@ -38,7 +41,17 @@ static void convert(void)
 {
     uint8_t pal[32];
     msx_palette(pal);
-    pva_cover_convert(cv, pal, COVER_FREE, out);     // (a PC does it at once: about 10 ms)
+    // (a PC does it at once: about 10 ms)
+    if (cfg.cover_rows)
+    {
+        pva_cover_convert_begin_rows(cv, pal, COVER_FREE, out);
+        while (!pva_cover_convert_step(cv)) {}
+    }
+    else
+    {
+        pva_cover_convert(cv, pal, COVER_FREE, out);
+        memset(out + PVA_COVER_SIZE, 0, PVA_COVER_ROWS_SIZE);
+    }
     set_state(COVER_READY);
 }
 
@@ -86,8 +99,23 @@ static bool decode_jpeg(const uint8_t *data, size_t len)
     return true;
 }
 
+bool cover_source(const uint8_t **data, size_t *len)
+{
+    if (state == COVER_NONE || !src) return false;
+    *data = src;
+    *len = src_len;
+    return true;
+}
+
 void cover_from_bytes(const uint8_t *data, size_t len)
 {
+    if (data != src)
+    {
+        free(src);
+        src = NULL;
+        src_len = 0;
+        if (data && len && (src = malloc(len))) { memcpy(src, data, len); src_len = len; }
+    }
     if (!cv) cv = malloc(sizeof *cv);
     if (!cv || !data || len < 8) { set_state(COVER_NONE); return; }
     if (decode_jpeg(data, len)) { convert(); return; }
@@ -221,5 +249,8 @@ void cover_track(const char *path)
 void cover_none(void)
 {
     key[0] = 0;
+    free(src);
+    src = NULL;
+    src_len = 0;
     if (state != COVER_NONE) set_state(COVER_NONE);
 }

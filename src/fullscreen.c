@@ -1,8 +1,7 @@
 // fullscreen.c - Z: four pictures, as PICOAMP's full screen: Bars (24 bars of
 // 20 cells, 40 steps, with peaks), Mirror (the bars from the middle up and
 // their reflection down), Plasma (four sines, its 12 colours turning faster
-// when the music is louder), Cover (the cover twice as big, its palette for
-// the whole screen).
+// when the music is louder), Cover (the cover big, in SCREEN 8's 256 colours).
 // Row 0 what plays; row 23 the picture's name and the time.
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +12,9 @@
 #include "sys.h"
 #include "cover.h"
 #include "pva_cover.h"
+#include "picture.h"
+#include "logo.h"
+#include "web.h"
 
 enum { FS_BARS, FS_MIRROR, FS_PLASMA, FS_COVER, FS_N };
 static const char *const fs_names[FS_N] = { "BARS", "MIRROR", "PLASMA", "COVER" };
@@ -142,32 +144,47 @@ static void fs_open(void)
     pl_phase = -1;
 }
 
-// the cover: 160 x 160 pixels (each of its pixels doubled), rows 1-20, columns 6-25
-static void draw_cover2(void)
+// the cover big, in SCREEN 8 (as the MSX with engine 0.17): the picture that shows (its file's, its
+// folder's, the one from the internet: iTunes' at 600 x 600; a default picture whole), fitted with the
+// MSX's dot shape and dithered to 256 colours
+static uint8_t  big[192][256];
+static unsigned big_gen = ~0u;
+static bool     big_ok;
+
+void fullscreen_pic_rgb(int id, int w, int h, const uint8_t *rgb)
+{
+    if ((unsigned)(id & 0xFFFFFF) != (big_gen & 0xFFFFFF) || w <= 0 || h <= 0 || !rgb) return;
+    pic_to_s8(rgb, w, h, big);
+    big_ok = true;
+}
+
+static void draw_cover_big(void)
 {
     ui_cover_follow();
-    const uint8_t *c = cover_data();
-    if (!c) { gfx_band(0, 0, NULL); gfx_str(10, 12, "NO COVER", 8, COL(GREY, NAVY)); return; }
-    const uint8_t *pat = c + PVA_COVER_PAL_SIZE, *col = pat + PVA_COVER_PAT_SIZE;
-    for (int cy = 0; cy < PVA_COVER_CELLS; cy++)
-        for (int cx = 0; cx < PVA_COVER_CELLS; cx++)
-            for (int r = 0; r < 8; r++)
-            {
-                int cell = cy * PVA_COVER_CELLS + cx;
-                uint8_t p = pat[cell * 8 + r], fg = col[cell * 8 + r] >> 4, bg = col[cell * 8 + r] & 15;
-                for (int x = 0; x < 8; x++)
-                {
-                    uint8_t v = (p & (0x80 >> x)) ? fg : bg;
-                    int px = 48 + (cx * 8 + x) * 2, py = 8 + (cy * 8 + r) * 2;
-                    gfx_fb[py][px] = gfx_fb[py][px + 1] = gfx_fb[py + 1][px] = gfx_fb[py + 1][px + 1] = v;
-                }
-            }
-    gfx_band(0, 192, c);                   // (the whole screen: its text is in the entries the cover keeps)
+    if (cover_state() == COVER_NONE) { big_ok = false; big_gen = cover_gen(); }
+    else if (cover_state() == COVER_READY && cover_gen() != big_gen)
+    {
+        big_gen = cover_gen();
+        const uint8_t *d;
+        size_t n;
+        big_ok = false;
+        if (cover_source(&d, &n))
+        {
+            for (int k = 0; k < DEFAULT_PICTURES; k++)
+                if (n == default_picture_len[k] && !memcmp(d, default_picture[k], n)) { d = default_picture_big[k]; n = default_picture_big_len[k]; break; }
+            big_ok = pic_bytes_s8(d, n, big) == PIC_OK;      // (a JPEG: here at once)
+            if (!big_ok) js_pic_bytes((int)(PIC_ID_COVER | (big_gen & 0xFFFFFF)), d, (int)n, 564, 384);   // (else the page's)
+        }
+    }
+    if (!big_ok) { gfx_str(10, 12, "NO COVER", 8, COL(GREY, NAVY)); return; }
+    memcpy(gfx_s8, big, sizeof big);
+    gfx_s8_on = true;
 }
 
 static void fs_set(int m)
 {
     fs_mode = (m + FS_N) % FS_N;
+    big_gen = ~0u;
     gfx_band(0, 0, NULL);
     gfx_reset_palette();
     pl_phase = -1;
@@ -179,7 +196,7 @@ static void fs_frame(void)
 {
     gfx_clear(NAVY);
     if (fs_mode == FS_PLASMA) draw_plasma();
-    else if (fs_mode == FS_COVER) draw_cover2();
+    else if (fs_mode == FS_COVER) draw_cover_big();
     else draw_bars(fs_mode == FS_MIRROR);
     gfx_fill(0, 0, 32, COL(WHITE, NAVY));
     ui_row0(0, 0, 32, COL(WHITE, NAVY));

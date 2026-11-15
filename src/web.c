@@ -15,6 +15,7 @@
 #include "script.h"
 #include "wxsvc.h"
 #include "cover.h"
+#include "picture.h"
 
 // ---------------- sys.h ----------------
 struct sys_mutex { int unused; };
@@ -143,6 +144,19 @@ void music_list(const char *path, dir_cb cb, void *user)
     cb(user, "", 0);
 }
 
+// the pictures' folder (picked apart from the music's): its entries come in dir_done too
+void pics_list(const char *path, dir_cb cb, void *user)
+{
+    for (int i = 0; i < 8; i++)
+        if (!dpend[i].used)
+        {
+            dpend[i] = (dpending_t){ cb, user, true };
+            js_pics_list(i, path, (int)strlen(path));
+            return;
+        }
+    cb(user, "", 0);
+}
+
 EXPORT(dir_done)
 void dir_done(int id, const char *lines, int ok)
 {
@@ -245,6 +259,33 @@ EXPORT(web_cover_bytes) void web_cover_bytes(const uint8_t *data, int len) { cov
 // a station's logo (or len 0: it has none)
 EXPORT(web_logo) void web_logo(const uint8_t *data, int len) { ui_logo(data, (size_t)len); }
 EXPORT(web_song) void web_song(const uint8_t *data, int len) { ui_song(data, (size_t)len); }
+// a picture the page read and decoded for SCREEN 8 (w 0: it could not): the pictures page's, or
+// (PIC_ID_COVER) the full screen cover's
+EXPORT(web_pic_rgb) void web_pic_rgb(int id, int w, int h, const uint8_t *rgb)
+{
+    if (id & PIC_ID_COVER) fullscreen_pic_rgb(id, w, h, rgb);
+    else pics_pic_rgb(id, w, h, rgb);
+}
+// (the page decodes what TJpgDec does not, later: web_pic_rgb)
+uint8_t *plat_decode_rgb(const uint8_t *data, size_t len, int max_w, int max_h, int *w, int *h)
+{
+    (void)data; (void)len; (void)max_w; (void)max_h; (void)w; (void)h;
+    return NULL;
+}
+// the picture as the canvas takes it (RGBA bytes: 0xAABBGGRR), made by gfx_to_rgb (the cover's rows'
+// palettes, SCREEN 8)
+static uint32_t rgb_buf[GFX_MAXW * GFX_MAXH];
+EXPORT(web_s8) int web_s8(void) { return gfx_s8_on; }
+EXPORT(web_rgb) uint32_t *web_rgb(void)
+{
+    gfx_to_rgb(rgb_buf);
+    for (int i = 0, n = gfx_w * gfx_h; i < n; i++)
+    {
+        uint32_t c = rgb_buf[i];
+        rgb_buf[i] = 0xFF000000u | (c & 0xFFu) << 16 | (c & 0xFF00u) | (c >> 16 & 0xFFu);
+    }
+    return rgb_buf;
+}
 // the band with the cover's palette (lines y0 .. y1 - 1; y1 0: none)
 EXPORT(web_band_y0) int web_band_y0(void) { return gfx_band_y0; }
 EXPORT(web_band_y1) int web_band_y1(void) { return gfx_band_y1; }

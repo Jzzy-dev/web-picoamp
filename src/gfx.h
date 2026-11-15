@@ -26,6 +26,12 @@ extern uint32_t gfx_pal_base[16];          // PICOAMP's own (gfx_pal can turn: t
 extern uint32_t gfx_band_pal[16];
 extern int      gfx_band_y0, gfx_band_y1;  // lines y0 .. y1 - 1 (y1 0: none)
 void gfx_band(int y0, int y1, const uint8_t *msx_pal);  // msx_pal: 16 x 0RRR0BBB, 00000GGG; NULL: none
+// the band's colours changed for each 8 lines (the cover's rows of cells: pva_cover.h's row table)
+#define GFX_BAND_ROWS 10
+void gfx_band_rows(const uint8_t *table);
+// SCREEN 8 instead (256 x 192, a byte a pixel: GGGRRRBB), while gfx_s8_on (set each frame)
+extern uint8_t gfx_s8[GFX_H][GFX_W];
+extern bool    gfx_s8_on;
 extern int gfx_w, gfx_h;                   // the picture's size now (shown 4:3)
 
 void gfx_set_size(int w, int h);           // 256 x 192 or 512 x 212

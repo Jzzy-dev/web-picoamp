@@ -7,7 +7,7 @@
 #include "audio.h"
 #include "viz.h"
 
-enum { PG_PLAYER, PG_FULL, PG_CLOCK, PG_WX, PG_NEWS, PG_COUNT };
+enum { PG_PLAYER, PG_FULL, PG_CLOCK, PG_WX, PG_NEWS, PG_PICS, PG_COUNT };
 
 typedef struct
 {
@@ -19,7 +19,8 @@ typedef struct
     void (*describe)(char *out, size_t n);   // for the scripts: what the page shows
 } page_t;
 
-extern const page_t page_full, page_clock, page_wx, page_news;
+extern const page_t page_full, page_clock, page_wx, page_news, page_pics;
+void pics_saver(void);                   // the screensaver: the pictures page's slideshow
 
 // from ui.c
 extern audio_status ui_st;               // the player now

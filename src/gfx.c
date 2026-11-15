@@ -8,6 +8,10 @@ uint32_t gfx_pal[16];
 uint32_t gfx_pal_base[16];
 uint32_t gfx_band_pal[16];
 int      gfx_band_y0, gfx_band_y1;
+static uint32_t band_rows[GFX_BAND_ROWS][16];  // the band's palette for each 8 lines (gfx_band_rows)
+static int      band_nrows;
+uint8_t  gfx_s8[GFX_H][GFX_W];
+bool     gfx_s8_on;
 int      gfx_w = GFX_W, gfx_h = GFX_H;
 
 void gfx_set_size(int w, int h)
@@ -50,6 +54,27 @@ void gfx_band(int y0, int y1, const uint8_t *msx_pal)
     }
     gfx_band_y0 = y0;
     gfx_band_y1 = y1;
+    band_nrows = 0;
+}
+
+void gfx_band_rows(const uint8_t *t)
+{
+    band_nrows = 0;
+    if (!t || !t[0] || gfx_band_y1 <= gfx_band_y0) return;
+    int n = t[0] + 1;                                 // (row 0 is the band's palette)
+    if (n > GFX_BAND_ROWS) n = GFX_BAND_ROWS;
+    memcpy(band_rows[0], gfx_band_pal, sizeof band_rows[0]);
+    for (int k = 1; k < n; k++)
+    {
+        memcpy(band_rows[k], band_rows[k - 1], sizeof band_rows[k]);
+        const uint8_t *e = t + 2 + (k - 1) * 20;      // entry, 90h, 0RRR0BBB, 00000GGG (x 5)
+        for (int i = 0; i < 5; i++, e += 4)
+        {
+            int r = e[2] >> 4 & 7, g = e[3] & 7, b = e[2] & 7;
+            band_rows[k][e[0] & 15] = ((unsigned)(r * 255 / 7) << 16) | ((unsigned)(g * 255 / 7) << 8) | (unsigned)(b * 255 / 7);
+        }
+    }
+    band_nrows = n;
 }
 
 void gfx_init(void)
@@ -267,9 +292,26 @@ int gfx_to_msx(const char *s, uint8_t *out, int max)
 
 void gfx_to_rgb(uint32_t *out)
 {
+    if (gfx_s8_on && gfx_w == GFX_W && gfx_h == GFX_H)
+    {
+        // SCREEN 8: a byte a pixel, GGGRRRBB
+        static const uint8_t l3[8] = { 0, 36, 73, 109, 146, 182, 219, 255 }, l2[4] = { 0, 73, 146, 255 };
+        for (int y = 0; y < GFX_H; y++)
+            for (int x = 0; x < GFX_W; x++)
+            {
+                uint8_t b = gfx_s8[y][x];
+                *out++ = (uint32_t)l3[b >> 2 & 7] << 16 | (uint32_t)l3[b >> 5] << 8 | l2[b & 3];
+            }
+        return;
+    }
     for (int y = 0; y < gfx_h; y++)
     {
         const uint32_t *pal = y >= gfx_band_y0 && y < gfx_band_y1 ? gfx_band_pal : gfx_pal;
+        if (band_nrows && y >= gfx_band_y0 && y < gfx_band_y1)
+        {
+            int k = (y - gfx_band_y0) / 8;
+            pal = band_rows[k < band_nrows ? k : band_nrows - 1];
+        }
         for (int x = 0; x < gfx_w; x++) *out++ = pal[gfx_fb[y][x]];
     }
 }
