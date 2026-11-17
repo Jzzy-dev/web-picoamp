@@ -289,6 +289,23 @@ try:
       check('station: the stream\'s own title (ICY)', str(t), r'^Artist One - Song A$')
       run('key V')
 
+      # how many are kept: past 200 covers the ones shown longest ago go (to 180); a "none" older
+      # than 30 days is asked again
+      page.evaluate('async () => { for (let i = 0; i < 215; i++) await picoamp.art.put("cover", "old " + i, false, 1577836800000 + i * 60000); }')
+      gone = page.evaluate('picoamp.art.prune("cover")')
+      check('covers: at most 200 kept', '%d' % page.evaluate('picoamp.art.count("cover")'), r'^180$')
+      if page.evaluate('picoamp.art.has("cover", "old 0")') or not page.evaluate('picoamp.art.has("cover", "old 214")'): fails += 1; print('FAIL covers: not the oldest went (%s)' % gone)
+      else: print('ok   covers: the oldest went')
+      page.evaluate('''async () => { const c = await caches.open("picoamp-logos");
+          for (const r of await c.keys()) if (r.url.includes("/picoamp-logo/"))
+              await c.put(r, new Response("", { headers: { "x-none": "1", "x-time": String(Date.now() - 31 * 864e5) } })); }''')
+      n1 = open(os.path.join(T, 'svc.log')).read().count('byuuid uuid-1')
+      load({'folder': 'radio:'})
+      run('key Home; key Down; key Down; key Enter; wait 500; key Down; key Down; key Enter; wait 1500; key V; key V; wait 500')
+      if open(os.path.join(T, 'svc.log')).read().count('byuuid uuid-1') == n1: fails += 1; print('FAIL logos: an old none not asked again')
+      else: print('ok   logos: a "none" older than 30 days: asked again')
+      run('key V')
+
       # the clock (place by IP, by name; sleep timer; alarm) and the weather
       out = run('key C; wait 1500; page')
       shot('clock')

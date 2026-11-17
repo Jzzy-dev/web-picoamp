@@ -48,6 +48,9 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
   A song's cover shows over the station's logo; a song without one shows the logo again. When
   nothing has a cover, one of three default pictures shows (Copacabana, New York, Amsterdam), a new
   one at random for each track or station.
+  How many are kept: at most 100 logos and 200 covers. Past that, the ones shown longest ago go
+  (down to 90 %). A "no logo" or "no cover" is asked again after 30 days. Other limits go in the
+  address: `?keeplogos=50&keepcovers=400` (0: keep all).
 * **Pictures (I):** pick a folder of pictures (Chrome and Edge remember it, as the music folder); its
   folders and pictures (anything the browser shows: JPEG, PNG, GIF, WebP, AVIF ...).
   * Enter shows one in MSX SCREEN 8 (256 × 192, 256 colours, fitted with the MSX's dot shape and

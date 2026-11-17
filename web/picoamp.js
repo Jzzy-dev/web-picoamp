@@ -367,6 +367,42 @@ function js_decode_image(p, n) {
 // an image proxy when its server allows no other page to read it) and kept in the browser's
 // cache, "no logo" too; the bytes go to the program (web_logo)
 const logoProxy = params.get('logoproxy') || 'https://wsrv.nl/?w=160&h=160&fit=inside&output=png&url=';
+// the logos and covers kept in the browser: at most 100 and 200 (keeplogos=, keepcovers= in the
+// address; 0: all); past that the ones shown longest ago go (down to 90 %); each keeps the time it
+// was last shown (x-time); a "none" (no picture found) is asked again after 30 days
+const keepOf = (k, d) => { const n = parseInt(params.get(k), 10); return isNaN(n) ? d : Math.max(0, n); };
+const ART = { logo: { pre: '/picoamp-logo/', keep: keepOf('keeplogos', 100) },
+              cover: { pre: '/picoamp-cover/', keep: keepOf('keepcovers', 200) } };
+const NONE_MS = 30 * 864e5, pruning = new Set();
+function artPut(cache, key, b, t) {
+    const h = { 'x-time': String(t || Date.now()) };
+    if (!b) h['x-none'] = '1';
+    return cache.put(key, new Response(b || '', { headers: h }));
+}
+// undefined: not known (ask); null: none; else the bytes (and shown now)
+async function artGet(cache, key) {
+    const hit = await cache.match(key);
+    if (!hit) return undefined;
+    const t = +hit.headers.get('x-time') || 0;
+    if (hit.headers.get('x-none')) return Date.now() - t > NONE_MS ? undefined : null;
+    const b = new Uint8Array(await hit.arrayBuffer());
+    if (Date.now() - t > 3600e3) artPut(cache, key, b).catch(() => { });   // (to the hour is enough)
+    return b;
+}
+async function artPrune(cache, kind) {
+    const a = ART[kind], pre = location.origin + a.pre;
+    if (!a.keep || pruning.has(kind)) return 0;
+    pruning.add(kind);
+    try {
+        const keys = (await cache.keys()).filter(r => r.url.startsWith(pre));
+        if (keys.length <= a.keep) return 0;
+        const ts = await Promise.all(keys.map(async r => { const m = await cache.match(r); return [r, (m && +m.headers.get('x-time')) || 0]; }));
+        ts.sort((x, y) => x[1] - y[1]);
+        const go = ts.slice(0, keys.length - Math.floor(a.keep * 9 / 10));
+        for (const [r] of go) await cache.delete(r);
+        return go.length;
+    } finally { pruning.delete(kind); }
+}
 let logoTok = 0;
 function isPicture(b) {
     if (b.length < 8) return false;
@@ -393,8 +429,8 @@ function js_station_logo(up, un, ip, inn, np, nn, rp, rn) {
         let cache = null;
         try {
             cache = await caches.open('picoamp-logos');
-            const hit = await cache.match(key);
-            if (hit) { done(hit.headers.get('x-none') ? null : new Uint8Array(await hit.arrayBuffer())); return; }
+            const got = await artGet(cache, key);
+            if (got !== undefined) { done(got); return; }
         } catch { cache = null; }
         let fav = '', answered = false;
         const ways = [uuid && '/json/stations/byuuid/' + encodeURIComponent(uuid),
@@ -418,7 +454,7 @@ function js_station_logo(up, un, ip, inn, np, nn, rp, rn) {
         }
         if (tok !== logoTok) return;
         if (cache && known) {
-            try { await cache.put(key, img ? new Response(img) : new Response('', { headers: { 'x-none': '1' } })); } catch { }
+            try { await artPut(cache, key, img); artPrune(cache, 'logo').catch(() => { }); } catch { }
         }
         done(img);
     })();
@@ -454,8 +490,8 @@ function js_song_cover(ap, an, wp, wn, album) {
         let cache = null;
         try {
             cache = await caches.open('picoamp-logos');
-            const hit = await cache.match(key);
-            if (hit) { done(hit.headers.get('x-none') ? null : new Uint8Array(await hit.arrayBuffer())); return; }
+            const got = await artGet(cache, key);
+            if (got !== undefined) { done(got); return; }
         } catch { cache = null; }
         const j = await itunes(term, album);
         if (tok !== songTok) return;
@@ -470,7 +506,7 @@ function js_song_cover(ap, an, wp, wn, album) {
         }
         if (tok !== songTok) return;
         if (cache && known) {
-            try { await cache.put(key, img ? new Response(img) : new Response('', { headers: { 'x-none': '1' } })); } catch { }
+            try { await artPut(cache, key, img); artPrune(cache, 'cover').catch(() => { }); } catch { }
         }
         done(img);
     })();
@@ -1121,6 +1157,10 @@ window.picoamp = {
         const cx = Math.floor(dest.x + (x + 0.5) * dest.w / 256), cy = Math.floor(dest.y + (y + 0.5) * dest.h / 192);
         return Array.from(g2.getImageData(cx, cy, 1, 1).data.slice(0, 3));
     },
+    art: { put: (kind, name, none, t) => caches.open('picoamp-logos').then(c => artPut(c, location.origin + ART[kind].pre + encodeURIComponent(name), none ? null : new Uint8Array([1, 2, 3]), t)),
+           count: kind => caches.open('picoamp-logos').then(c => c.keys()).then(k => k.filter(r => r.url.startsWith(location.origin + ART[kind].pre)).length),
+           has: (kind, name) => caches.open('picoamp-logos').then(c => c.match(location.origin + ART[kind].pre + encodeURIComponent(name))).then(r => !!r),
+           prune: kind => caches.open('picoamp-logos').then(c => artPrune(c, kind)) },   // (the tests)
     npIcy, npProbe,                       // (the tests: a stream's own title; every way for a station)
     get audio() { return { cur, paused: el.paused, plainPaused: plain.paused, gainL, gainR, eqGains, ctx: ctx && ctx.state }; },
 };
