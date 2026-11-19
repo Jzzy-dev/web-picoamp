@@ -14,6 +14,7 @@
 #include "viz.h"
 #include "script.h"
 #include "wxsvc.h"
+#include "markets.h"
 #include "cover.h"
 #include "picture.h"
 
@@ -195,6 +196,7 @@ void web_start(void)
 EXPORT(web_frame)
 void web_frame(void)
 {
+    ms_poll();
     if (!started) return;
     wx_tick();
     ui_frame();

@@ -40,8 +40,15 @@ typedef struct
     char   alarm_name[256];
     // [news]
     bool   news_by_feed;     // the feed's order (else newest first)
+    // [markets]
+    int    mk_region;        // 0 Europe, 1 Americas, 2 Asia-Pacific
+    int    mk_sort;          // 0 the list's order, 1 the risers first, 2 the fallers first
+    int    mk_range;         // the chart's range: 0 1D .. 7 all
+    int    mk_refresh;       // seconds between the prices
+    char   mk_list[1024];    // My list: Yahoo Finance symbols, a comma between them
     // [cover]
     bool   cover_rows;       // five colours of its own for every row of the cover's cells (else for all)
+    int    keep_logos, keep_covers;   // how many are kept (0: all)
     // [pictures]
     int    pic_saver;        // the screensaver after this many minutes without a key (0: off)
     int    pic_interval;     // seconds a picture shows in a slideshow

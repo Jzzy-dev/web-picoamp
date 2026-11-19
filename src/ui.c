@@ -858,7 +858,7 @@ static void draw_help(void)
         { A_NORM, "T          news       / J    search" },
         { A_NORM, "F          favourite+ D, DEL favourite-" },
         { A_NORM, "I          pictures   Ctrl+Up/Down fav" },
-        { A_NORM, "O          edit the station lists" },
+        { A_NORM, "O          lists      $      markets" },
         { A_NORM, "? or F1    this help (or click the ?)" },
         { COL(CYAN, NAVY), "Page: F11, Alt+Enter or a double click" },
         { COL(CYAN, NAVY), "  outside the picture: full screen," },
@@ -893,7 +893,7 @@ static void draw_help(void)
 }
 
 // ---------------- pages ----------------
-static const page_t *const pages[PG_COUNT] = { NULL, &page_full, &page_clock, &page_wx, &page_news, &page_pics };
+static const page_t *const pages[PG_COUNT] = { NULL, &page_full, &page_clock, &page_wx, &page_news, &page_pics, &page_markets };
 
 int ui_page_now(void) { return page; }
 
@@ -1075,6 +1075,7 @@ void ui_key(int k)
     case 'W': ui_page(PG_WX); return;
     case 'T': ui_page(PG_NEWS); return;
     case 'I': ui_page(PG_PICS); return;
+    case '$': ui_page(PG_MARKETS); return;
     case 'F': fav_add(); return;
     case 'D': case K_DEL: fav_del(); return;
     case K_CTRL_UP: case K_CTRL_DOWN:
@@ -1189,7 +1190,10 @@ void ui_drop(const char *const *paths, int n)
         }
         else if (u_ends_with_ci(paths[i], ".opml") || u_ends_with_ci(paths[i], ".xml"))
         {
-            ui_message("The news is not in the web version yet", true);
+            int n = news_import(paths[i]);
+            if (n < 0) snprintf(note, sizeof note, "Cannot read %s", u_basename(paths[i]));
+            else snprintf(note, sizeof note, "%d feeds added to My feeds (T: the news)", n);
+            ui_message(note, n <= 0);
         }
         else if (sys_is_dir(paths[i])) open_place(paths[i], NULL);
     }

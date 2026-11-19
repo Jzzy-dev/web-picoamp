@@ -8,6 +8,22 @@
 
 (() => {
 const params = new URLSearchParams(location.search);
+// the relay (relay/worker.js: a Cloudflare Worker of one's own): the sites that do not let other
+// pages read them (Yahoo Finance for the markets, the news' feeds and stories, stations' status
+// pages for the song titles) come through it. relay=https://... in the address is kept in the
+// browser (relay=off forgets it); RELAY_DEFAULT when none was given.
+const RELAY_DEFAULT = '';
+const relay = (() => {
+    const ok = u => /^https:\/\//i.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(u);
+    let r = params.get('relay');
+    try {
+        if (r !== null) { if (ok(r)) localStorage.setItem('picoamp-relay', r); else localStorage.removeItem('picoamp-relay'); }
+        r = localStorage.getItem('picoamp-relay');
+    } catch { if (r !== null && !ok(r)) r = null; }
+    r = r || RELAY_DEFAULT;
+    return r ? r.replace(/\?url=$/, '').replace(/\/?$/, '/') : '';
+})();
+const relayed = u => relay + '?url=' + encodeURIComponent(u);
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 let wasm, mem, X;            // the instance's memory and exports
@@ -45,6 +61,12 @@ const env = [];
 for (const [k, v] of Object.entries(envMap)) if (params.get(k)) env.push(`${v}=${params.get(k)}`);
 const lineBuf = { 1: '', 2: '' };
 const wasi = {
+    // the time (C's time(), clock()): realtime, else the page's own clock; nanoseconds
+    clock_time_get(id, precision, tp) {
+        const ns = id === 0 ? BigInt(Date.now()) * 1000000n : BigInt(Math.round(performance.now() * 1e6));
+        new DataView(mem.buffer).setBigUint64(tp, ns, true);
+        return 0;
+    },
     environ_sizes_get(cp, sp) {
         const dv = new DataView(mem.buffer);
         dv.setUint32(cp, env.length, true);
@@ -513,8 +535,18 @@ function js_song_cover(ap, an, wp, wn, album) {
 }
 
 // ---------------- the web ----------------
+const NO_RELAY = 'needs the relay (relay= in the page\'s address: see the README)';
 function js_fetch(id, p, n) {
-    const url = str(p, n);
+    let url = str(p, n);
+    // "relay:" before the address: through the relay, or not at all
+    if (url.startsWith('relay:')) {
+        if (!relay) {
+            const [bp] = put(new Uint8Array(0)), [ep] = put(NO_RELAY);
+            queueMicrotask(() => { try { X.net_done(id, 0, bp, 0, ep); } finally { X.web_free(bp); X.web_free(ep); } });
+            return;
+        }
+        url = relayed(url.slice(6));
+    }
     fetch(url, { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined }).then(async r => {
         const b = new Uint8Array(await r.arrayBuffer());
         return [r.status, b, ''];
@@ -609,7 +641,7 @@ function cErr(msg) { withStr(msg, p => X.web_audio_error(p)); }
 //   * last, onlineradiobox.com's now playing, by the station's name and country (Radio Browser's): it
 //     lists most stations of the world, and lets other pages read it.
 // (A relay that adds CORS can be given: npproxy=https://...?url= ; the status pages go through it too.)
-const npProxies = (params.get('npproxy') || '').split(' ').filter(x => x);
+const npProxies = [...(relay ? [relay + '?url='] : []), ...(params.get('npproxy') || '').split(' ').filter(x => x)];
 const npRb = params.get('rb') || 'https://all.api.radio-browser.info';
 const npStations = new Map();           // a stream's address -> its name and country (Radio Browser), or null
 let npTimer = 0, npGen = 0, npLast = '';

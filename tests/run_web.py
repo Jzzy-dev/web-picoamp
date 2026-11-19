@@ -317,9 +317,6 @@ try:
       check('clock: a place by name', out, r"place='Sydney, Nova Scotia, CA'")
       check('weather: now', out, r"weather place='Sydney, Nova Scotia, CA' now=8\.4 code=61 \(Rain\)")
       check('weather: the days', out, r'2026-11-08 Sun code=71 max=31 min=-62 rain=65%')
-      out = run('key C; key T; wait 50; page; key T')
-      check('news: says it is not here yet', out, r'news: not in the web version')
-
       # the pictures (I): a folder picked, its folders and pictures, one in SCREEN 8, the next (a PNG), the slideshow
       out = run('key Esc; key I; wait 100; page')
       check('pictures: no folder yet', out, r"pictures browse folder='' entries=1 folders=1 pictures=0")
@@ -354,6 +351,36 @@ try:
         return [m[0], m[1], m[2], e[0], e[1], e[2]].join(","); }''')
       check('the cover big (SCREEN 8): the logo, black beside it', px, r'^\d{1,2},(1[5-9]\d|2\d\d),\d{1,3},0,0,0$')
       run('key Z')
+
+      # the markets ($) and the news (T): their sites do not let pages read them, so through the relay;
+      # without one they say so
+      page.goto(URL + '&relay=off')
+      page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
+      out = run('key Esc; key $; wait 800; page; key Esc; key T; wait 100; key A; type https://feeds.bbci.co.uk/news/rss.xml; key Enter; wait 500; page; key T')
+      check('markets: no relay, it says so', out, r"markets table region=Europe list='Indices' rows=20 state=3 .*err='needs the relay")
+      check('news: no relay, it says so', out, r"news \w+ .*state=3 .*err='needs the relay")
+      page.goto(URL + '&relay=' + SVC + '/relay/')
+      page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
+      out = run('key Esc; key $; wait 1500; page; key Down; key Down; key Down; key Down; key I; wait 1500; page; key BS; key Home; key Enter; wait 1500; page; key T; wait 600; page; key Esc; page')
+      shot('markets')
+      check('markets: Europe\'s indices (the relay)', out, r"markets table region=Europe list='Indices' rows=20 state=2")
+      check('markets: AEX\'s price', out, r'\^AEX AEX [0-9]')
+      check('markets: the tape', out, r'tape: \^AEX,\^GDAXI,\^FTSE,\^FCHI story 0 & more \+\+\+')
+      check('markets: FTSE 100\'s members', out, r"list='FTSE 100' rows=98 state=2")
+      check('markets: the day\'s chart', out, r'sym=\^AEX range=1D chart=2 points=33')
+      check('markets: its headlines', out, r'head: \^AEX story 5 & more')
+      check('markets: the headlines in the news reader', out, r"news headlines feed='Market news: AEX' state=2 stories=6")
+      check('markets: and back', out, r'markets chart .* sym=\^AEX range=1D')
+      page.goto(URL + '&relay=' + SVC + '/relay/')
+      page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
+      out = run('key Esc; key T; wait 100; key A; type https://feeds.bbci.co.uk/news/rss.xml; key Enter; wait 800; page; key End; key Enter; wait 800; page; key Down; key Enter; key Enter; wait 1000; page; key Esc; key Esc; key T')
+      shot('news')
+      check('news: a feed (the relay)', out, r"news headlines feed='Test News' state=2 stories=30")
+      check('news: the full article (the story\'s page)', out, r'news story .*article=2 lines=3\d[\s\S]*Paragraph 1 of the article 24')
+      check('relay: asked for Yahoo and the feed', open(os.path.join(T, 'svc.log')).read(), r'relay https://query1\.finance\.yahoo\.com/v8/finance/spark\?symbols=[\s\S]*relay https://feeds\.bbci\.co\.uk/news/rss\.xml')
+      page.goto(URL + '&relay=off')
+      page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
+
 
       # the codecs the browser plays
       codecs = page.evaluate('''() => ["MP3","AAC","OGG","OPUS","FLAC"].map(c => c + "=" + (new Audio().canPlayType({MP3:"audio/mpeg",AAC:"audio/aac",OGG:"audio/ogg; codecs=\\"vorbis\\"",OPUS:"audio/ogg; codecs=\\"opus\\"",FLAC:"audio/flac"}[c]) || "no")).join(" ")''')

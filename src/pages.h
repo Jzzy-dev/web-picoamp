@@ -7,7 +7,7 @@
 #include "audio.h"
 #include "viz.h"
 
-enum { PG_PLAYER, PG_FULL, PG_CLOCK, PG_WX, PG_NEWS, PG_PICS, PG_COUNT };
+enum { PG_PLAYER, PG_FULL, PG_CLOCK, PG_WX, PG_NEWS, PG_PICS, PG_MARKETS, PG_COUNT };
 
 typedef struct
 {
@@ -19,7 +19,7 @@ typedef struct
     void (*describe)(char *out, size_t n);   // for the scripts: what the page shows
 } page_t;
 
-extern const page_t page_full, page_clock, page_wx, page_news, page_pics;
+extern const page_t page_full, page_clock, page_wx, page_news, page_pics, page_markets;
 void pics_saver(void);                   // the screensaver: the pictures page's slideshow
 
 // from ui.c
@@ -39,4 +39,6 @@ void ui_eq_next(void);                   // E
 // from fullscreen.c etc.
 void clock_service_tick(void);           // the sleep timer and the alarm (every frame)
 void clock_alarm_ack(void);
+void news_open_market(const char *name);  // the news reader with the markets' headlines (ESC: back there)
+void news_feed_taken(void);              // the markets fetch a feed: the news page's own is gone
 int  news_import(const char *opml_path);  // feeds added, -1: not readable              // a playback key: the alarm has been heard

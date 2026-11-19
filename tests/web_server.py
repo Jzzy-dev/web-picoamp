@@ -10,6 +10,8 @@
 #   files                          /music/<name> (the test's music, CORS)
 #   station logos                  /json/stations/byuuid/<uuid>, /json/stations/byurl; /logos/green.png
 #                                  (CORS), /logos/nocors.png (none: through /proxy?url=, as wsrv.nl)
+#   the relay                      /relay/?url=: Yahoo Finance (/v8/finance/spark, /rss/2.0/headline), the
+#                                  news (feeds.bbci.co.uk: /feeds/rss.xml; news.example.com/articles/<n>.html)
 #
 #   web_server.py <port> <mp3 for the streams> <music folder>
 import http.server, json, os, sys, urllib.parse, time, threading
@@ -112,6 +114,55 @@ class H(http.server.BaseHTTPRequestHandler):
                           "temperature_2m_max": [10.2, 11.0, 12.5, 3.1, 15.0, 9.9],
                           "temperature_2m_min": [4.1, 3.0, 4.4, -6.2, 10.0, 2.2],
                           "precipitation_probability_max": [80, 20, 0, 65, 100, 10]}}))
+        elif p == '/relay/':                               # PicoAmp's relay (relay/worker.js), its sites faked here
+            t = urllib.parse.urlparse(q.get('url', ''))
+            print('relay', q.get('url', ''), flush=True)
+            if not self.headers.get('Origin'):
+                self.send_response(403); self.end_headers(); return
+            here = {'query1.finance.yahoo.com', 'query2.finance.yahoo.com', 'feeds.finance.yahoo.com', 'news.example.com', '127.0.0.1:%d' % PORT}
+            if t.netloc in here: self.path = t.path + ('?' + t.query if t.query else '')
+            elif t.netloc == 'feeds.bbci.co.uk': self.path = '/feeds/rss.xml'
+            else: self.send_response(404); self.send_header('Access-Control-Allow-Origin', '*'); self.end_headers(); return
+            return self.do_GET()
+        elif p == '/v8/finance/spark':                     # Yahoo Finance's chart service (as it answered in November 2026)
+            syms = q.get('symbols', '').split(',')
+            rng, out = q.get('range', '1d'), {}
+            for k, sy in enumerate(syms):
+                h = sum(ord(c) for c in sy)
+                price = 100 + h % 900 + (h % 97) / 100.0
+                prev = round(price * (1 - ((h % 7) - 3) / 100.0), 2)
+                n = {'1d': 1, '5d': 46, '1mo': 24, '6mo': 133, 'ytd': 223, '1y': 256, '5y': 262, 'max': 410}.get(rng, 1)
+                if q.get('interval') == '15m': n = 34
+                step = {'15m': 900, '60m': 3600, '1wk': 604800, '1mo': 2629800}.get(q.get('interval'), 86400)
+                end = 1794587400
+                ts = [end - (n - 1 - i) * step for i in range(n)] if n > 1 else [1794572130]
+                cl = [round(prev + (price - prev) * i / max(n - 1, 1) + (2 if (i // 4) % 2 else -2), 2) for i in range(n)] if n > 1 else [price]
+                cl[-1] = price
+                if n > 3: cl[2] = None
+                out[sy] = {"timestamp": ts, "symbol": sy, "end": end if q.get('interval') == '15m' else None,
+                           "start": 1794556800 if q.get('interval') == '15m' else None, "close": cl, "previousClose": None,
+                           "chartPreviousClose": prev, "fulldayChange": round(price - prev, 2), "fulldayPrice": price, "dataGranularity": 300}
+                if sy == 'NOPE.XX': del out[sy]
+            self.reply(json.dumps(out))
+        elif p == '/rss/2.0/headline':                     # Yahoo Finance's feed for symbols
+            s = q.get('s', '')
+            items = ''.join('<item><title>%s story %d &amp; more</title><link>https://news.example.com/articles/%d.html</link>'
+                            '<description>About %s.</description><pubDate>Fri, 13 Nov 2026 1%d:00:00 +0000</pubDate></item>' % (s, i, i, s, i) for i in range(6))
+            self.reply('<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Yahoo! Finance: %s News</title>%s</channel></rss>' % (s, items), 'application/xml')
+        elif p == '/feeds/rss.xml':
+            items = ''.join('<item><title>Story %d &amp; more</title><link>https://news.example.com/articles/%d.html</link>'
+                            '<description>&lt;p&gt;Summary of story %d, with some words to wrap over the lines of the screen.&lt;/p&gt;</description>'
+                            '<pubDate>Thu, 05 Nov 2026 %02d:%02d:00 GMT</pubDate></item>' % (i, i, i, 8 + i // 6, (i * 7) % 60) for i in range(30))
+            self.reply('<?xml version="1.0"?><rss version="2.0"><channel><title>Test News</title>%s</channel></rss>' % items, 'application/rss+xml')
+        elif p == '/feeds/atom.xml':
+            self.reply('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Atom Feed</title>'
+                       '<entry><title>An atom story</title><link href="https://news.example.com/articles/1.html"/>'
+                       '<updated>2026-11-05T09:30:00Z</updated><summary>Atom summary.</summary></entry></feed>' , 'application/atom+xml')
+        elif p.startswith('/articles/'):
+            n = p.split('/')[-1].split('.')[0]
+            paras = ''.join('<p>Paragraph %d of the article %s. It has a few sentences, enough to fill a line or two of the reader.</p>' % (k, n) for k in range(12))
+            self.reply('<html><head><title>x</title><script>var a=1;</script></head><body><nav>Menu Home News</nav>'
+                       '<article><h1>Article %s</h1>%s</article><footer>Footer text</footer></body></html>' % (n, paras), 'text/html')
         elif p == '/status-json.xsl':
             print("status", flush=True)
             self.reply(json.dumps({"icestats": {"source": [

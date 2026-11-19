@@ -28,6 +28,9 @@ jobs:
           pip install playwright
           python3 -m playwright install --with-deps chromium
 
+      - name: "The relay (Cloudflare Worker) against pretend sites"
+        run: node tests/relay_test.mjs
+
       - name: "Tests in headless Chromium"
         run: python3 tests/run_web.py --shots shots
 

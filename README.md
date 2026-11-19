@@ -65,6 +65,11 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
 * **Clock (C)** with sleep timer and alarm, and **Weather (W)** for the place of your internet connection
   ([GeoJS](https://www.geojs.io)) or a place found by name, from [Open-Meteo](https://open-meteo.com).
   * The alarm and sleep timer only work while the page is open (in a background tab is fine).
+* **Markets ($)** and **News (T)**, as in PicoAmp for Windows: the market monitor (indices, currencies,
+  commodities, crypto and My list from Yahoo Finance, delayed; a chart per instrument; its headlines)
+  and the news reader (feeds by topic, My feeds, the full story). Both need [the relay](#the-relay):
+  their sites do not let other pages read them. Without it they say so.
+  * A feed list (OPML) dropped on the page goes into My feeds.
 * **Media keys and the lock screen:** play/pause, next and previous work through the browser.
 * **Any window size:** fit at 4:3 and sharp (whole-pixel enlargement, only the last step smoothed).
   F2 switches to whole multiples or stretch, F3 adds scan lines, and F11, Alt+Enter or a double click
@@ -89,11 +94,28 @@ A web page may only read another site when that site allows it (CORS). This has 
   stations, many Icecast stations), and last [onlineradiobox.com](https://onlineradiobox.com)'s now
   playing, found by the station's name and country (Qmusic, Sky Radio and most big stations). In a live
   check of the 53 most listened https stations, 32 tell their song this way; the rest show their name.
-* **The news (T)** is not in the web version: most feeds do not allow pages to read them.
+* **The markets and the news** (Yahoo Finance, the feeds and the stories' pages) come through
+  [the relay](#the-relay).
 
-A small relay of PicoAmp's own (for example a free Cloudflare Worker) would solve all four
-(`npproxy=` gives the song titles' requests one). That is the
-next step.
+With the relay the song titles ask the stations' status pages through it too, so more stations show
+their song.
+
+## The relay
+
+`relay/worker.js` is a [Cloudflare Worker](https://workers.cloudflare.com) (free) that fetches a page for
+PicoAmp and hands it on with CORS allowed. It answers PicoAmp's own page only (jzzy-dev.github.io and
+localhost; add others in the Worker's `ORIGINS` variable, spaces between them), only http(s) to public
+hosts, only text (feeds, pages, JSON: no audio or video), up to 4 MB. On Cloudflare's free plan it cannot
+cost anything: past 100,000 requests a day it stops answering until the next day.
+
+1. In the Cloudflare dashboard: **Workers & Pages → Create → Create Worker**, name it (for example
+   `picoamp-relay`), **Deploy**.
+2. **Edit code**: replace it all with `relay/worker.js`, **Deploy**.
+3. Open PicoAmp once with `?relay=https://picoamp-relay.<you>.workers.dev/`. The browser keeps it;
+   `?relay=off` forgets it.
+
+`RELAY_DEFAULT` at the top of `web/picoamp.js` is the relay used when none was given.
+`node tests/relay_test.mjs` tests the Worker against pretend sites.
 
 ## Build and run
 
@@ -108,7 +130,8 @@ make test                           # the tests in headless Chromium (needs ffmp
 * `web/` is the whole site: `index.html`, `picoamp.js` (the page: picture, keys, sound, storage, files),
   `style.css` and `picoamp.wasm`.
 * `src/` is the C program. Most of it is shared with PicoAmp for Windows. `web.c` is its link to the
-  page, `audio_web.c` the player, `news_web.c` the news page's note.
+  page, `audio_web.c` the player. `mktsvc.c` and `newsfeed.c` fetch in a thread on Windows and through
+  the relay here (`__wasm__`).
 * The services' addresses can be changed for tests: `?rb=…&meteo=…&geo=…&ipapi=…`.
 
 **GitHub Pages:** the workflow builds, tests and publishes `web/`. In the repository's
