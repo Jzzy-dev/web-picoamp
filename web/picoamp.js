@@ -10,18 +10,20 @@
 const params = new URLSearchParams(location.search);
 // the relay (relay/worker.js: a Cloudflare Worker of one's own): the sites that do not let other
 // pages read them (Yahoo Finance for the markets, the news' feeds and stories, stations' status
-// pages for the song titles) come through it. relay=https://... in the address is kept in the
-// browser (relay=off forgets it); RELAY_DEFAULT when none was given.
-const RELAY_DEFAULT = '';
+// pages for the song titles) come through it. In the address, kept in the browser:
+// relay=https://... another one, relay=off none, relay=default RELAY_DEFAULT again.
+const RELAY_DEFAULT = 'https://picoamp-relay.jzzycool.workers.dev/';
 const relay = (() => {
     const ok = u => /^https:\/\//i.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(u);
     let r = params.get('relay');
+    if (r !== null && r !== 'off' && !ok(r)) r = 'default';
     try {
-        if (r !== null) { if (ok(r)) localStorage.setItem('picoamp-relay', r); else localStorage.removeItem('picoamp-relay'); }
+        if (r === 'default') localStorage.removeItem('picoamp-relay');
+        else if (r !== null) localStorage.setItem('picoamp-relay', r);
         r = localStorage.getItem('picoamp-relay');
-    } catch { if (r !== null && !ok(r)) r = null; }
+    } catch { if (r === 'default') r = null; }
     r = r || RELAY_DEFAULT;
-    return r ? r.replace(/\?url=$/, '').replace(/\/?$/, '/') : '';
+    return r === 'off' ? '' : r.replace(/\?url=$/, '').replace(/\/?$/, '/');
 })();
 const relayed = u => relay + '?url=' + encodeURIComponent(u);
 const enc = new TextEncoder();

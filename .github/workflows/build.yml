@@ -38,6 +38,10 @@ jobs:
         continue-on-error: true
         run: python3 tests/live_web.py && mv live-*.png shots/
 
+      - name: "Live check: the relay, markets and news (information)"
+        continue-on-error: true
+        run: python3 tests/live_relay.py
+
       - name: "Live check: what real stations play (information)"
         continue-on-error: true
         run: python3 tests/live_np.py

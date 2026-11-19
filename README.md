@@ -111,10 +111,11 @@ cost anything: past 100,000 requests a day it stops answering until the next day
 1. In the Cloudflare dashboard: **Workers & Pages → Create → Create Worker**, name it (for example
    `picoamp-relay`), **Deploy**.
 2. **Edit code**: replace it all with `relay/worker.js`, **Deploy**.
-3. Open PicoAmp once with `?relay=https://picoamp-relay.<you>.workers.dev/`. The browser keeps it;
-   `?relay=off` forgets it.
+3. Open PicoAmp once with `?relay=https://picoamp-relay.<you>.workers.dev/`. The browser keeps it.
+   `?relay=off` uses none, `?relay=default` goes back to the built-in one.
 
-`RELAY_DEFAULT` at the top of `web/picoamp.js` is the relay used when none was given.
+`RELAY_DEFAULT` at the top of `web/picoamp.js` is the built-in relay (PicoAmp's own, at
+`picoamp-relay.jzzycool.workers.dev`): the page on GitHub Pages uses it unless told otherwise.
 `node tests/relay_test.mjs` tests the Worker against pretend sites.
 
 ## Build and run

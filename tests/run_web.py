@@ -54,7 +54,8 @@ log = open(os.path.join(T, 'svc.log'), 'w')
 svc = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tests', 'web_server.py'), str(SVC_PORT), os.path.join(M, '01 Sine.mp3'), M], stdout=log, stderr=log)
 time.sleep(0.6)
 
-URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi&logoproxy=%s/proxy%%3Furl%%3D&itunes=%s/itunes&npproxy=' % (PAGE_PORT, SVC, SVC, SVC, SVC, SVC, SVC)
+URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi&logoproxy=%s/proxy%%3Furl%%3D&itunes=%s/itunes&npproxy=&relay=off' % (PAGE_PORT, SVC, SVC, SVC, SVC, SVC, SVC)
+URL_RELAY = URL.replace('relay=off', 'relay=%s/relay/' % SVC)   # (the fake relay; else none, not the real default)
 fails = 0
 def check(name, out, pattern):
     global fails
@@ -354,12 +355,12 @@ try:
 
       # the markets ($) and the news (T): their sites do not let pages read them, so through the relay;
       # without one they say so
-      page.goto(URL + '&relay=off')
+      page.goto(URL)
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
       out = run('key Esc; key $; wait 800; page; key Esc; key T; wait 100; key A; type https://feeds.bbci.co.uk/news/rss.xml; key Enter; wait 500; page; key T')
       check('markets: no relay, it says so', out, r"markets table region=Europe list='Indices' rows=20 state=3 .*err='needs the relay")
       check('news: no relay, it says so', out, r"news \w+ .*state=3 .*err='needs the relay")
-      page.goto(URL + '&relay=' + SVC + '/relay/')
+      page.goto(URL_RELAY)
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
       out = run('key Esc; key $; wait 1500; page; key Down; key Down; key Down; key Down; key I; wait 1500; page; key BS; key Home; key Enter; wait 1500; page; key T; wait 600; page; key Esc; page')
       shot('markets')
@@ -371,14 +372,14 @@ try:
       check('markets: its headlines', out, r'head: \^AEX story 5 & more')
       check('markets: the headlines in the news reader', out, r"news headlines feed='Market news: AEX' state=2 stories=6")
       check('markets: and back', out, r'markets chart .* sym=\^AEX range=1D')
-      page.goto(URL + '&relay=' + SVC + '/relay/')
+      page.goto(URL_RELAY)
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
       out = run('key Esc; key T; wait 100; key A; type https://feeds.bbci.co.uk/news/rss.xml; key Enter; wait 800; page; key End; key Enter; wait 800; page; key Down; key Enter; key Enter; wait 1000; page; key Esc; key Esc; key T')
       shot('news')
       check('news: a feed (the relay)', out, r"news headlines feed='Test News' state=2 stories=30")
       check('news: the full article (the story\'s page)', out, r'news story .*article=2 lines=3\d[\s\S]*Paragraph 1 of the article 24')
       check('relay: asked for Yahoo and the feed', open(os.path.join(T, 'svc.log')).read(), r'relay https://query1\.finance\.yahoo\.com/v8/finance/spark\?symbols=[\s\S]*relay https://feeds\.bbci\.co\.uk/news/rss\.xml')
-      page.goto(URL + '&relay=off')
+      page.goto(URL)
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
 
 
