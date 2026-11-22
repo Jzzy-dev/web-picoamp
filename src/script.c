@@ -71,9 +71,9 @@ bool script_step(void)
         {
             audio_status s;
             audio_status_get(&s);
-            fprintf(out, "state=%d elapsed=%d/%d rate=%d ch=%d br=%d stream=%d buf=%d(%d%%) pl=%d/%d vol=%d title='%s' artist='%s' album='%s' err='%s'\n",
+            fprintf(out, "state=%d elapsed=%d/%d rate=%d ch=%d br=%d stream=%d buf=%d(%d%%) pl=%d/%d vol=%d title='%s' artist='%s' album='%s' err='%s' system=%d source='%s' mode=%d muted=%d\n",
                     s.state, s.elapsed, s.total, s.rate, s.channels, s.bitrate, s.stream, s.buffering, s.buf_pct,
-                    s.pl_pos + 1, s.pl_count, s.volume, s.title, s.artist, s.album, s.error);
+                    s.pl_pos + 1, s.pl_count, s.volume, s.title, s.artist, s.album, s.error, s.system, s.source, s.mode, s.muted);
         }
         else if (!strcmp(cmd, "list") || !strcmp(cmd, "page"))
         {

@@ -4,6 +4,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include "eq.h"
 
 enum { ST_STOPPED = 0, ST_PLAYING = 1, ST_PAUSED = 2 };
@@ -29,6 +30,9 @@ typedef struct
     char url[2048];          // the station that plays (or the file)
     char error[160];         // the last error (shown once: err_gen)
     unsigned err_gen;
+    bool system;             // a Sonos room is followed (its sound stays there): the status is its
+    char source[64];         // "Sonos Living Room"
+    unsigned art_gen;        // +1 when its picture changes (audio_follow_art)
 } audio_status;
 
 bool audio_init(bool null_device);
@@ -53,3 +57,7 @@ void audio_set_mode(int mode);
 void audio_set_eq(const int8_t gains[EQ_BANDS]);
 
 void audio_status_get(audio_status *s);
+
+// a Sonos room (sonos.h, through PicoAmp for Windows): followed as a player, its sound stays there
+void audio_follow_sonos(const char *id);
+bool audio_follow_art(uint8_t **data, size_t *len);

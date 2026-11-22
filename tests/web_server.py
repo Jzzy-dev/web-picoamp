@@ -13,6 +13,9 @@
 #   the relay                      /relay/?url=: Yahoo Finance (/v8/finance/spark, /rss/2.0/headline), the
 #                                  news (feeds.bbci.co.uk: /feeds/rss.xml; news.example.com/articles/<n>.html)
 #
+#   the Sonos bridge               /sonos/rooms, now, cmd, vol, art (as PicoAmp for Windows answers them:
+#                                  "Living Room" plays a song, "Kitchen + 1" a station); /sonos/log what it was told
+#
 #   web_server.py <port> <mp3 for the streams> <music folder>
 import http.server, json, os, sys, urllib.parse, time, threading
 
@@ -26,6 +29,13 @@ def station(i, name=None, codec='MP3', hls=0):
             "countrycode": "NL", "tags": "jazz,pop"}
 
 clicks = []
+
+# the Sonos bridge's pretend rooms
+sonos = {'RINCON_A': {'state': 'playing', 'title': 'Fake Song', 'artist': 'Fake Artist', 'album': 'Fake Album', 'total': 210000,
+                      'volume': 30, 'muted': False, 'shuffle': False, 'repeat': 0, 'track': 1, 't0': time.time(), 'radio': False},
+         'RINCON_B': {'state': 'playing', 'title': 'Radio Song', 'artist': 'Radio Artist', 'album': 'Radio Fake', 'total': 0,
+                      'volume': 40, 'muted': False, 'shuffle': False, 'repeat': 0, 'track': 1, 't0': time.time(), 'radio': True}}
+sonos_log = []
 
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -45,10 +55,48 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Icy-MetaData')
         self.end_headers()
 
+    def sonos(self, what, q):
+        if what == 'rooms':
+            return self.reply(json.dumps({'state': 'done', 'error': '', 'rooms': [
+                {'id': 'RINCON_B', 'name': 'Kitchen + 1', 'members': 2}, {'id': 'RINCON_A', 'name': 'Living Room', 'members': 1}]}))
+        if what == 'log':
+            return self.reply('\n'.join(sonos_log) + '\n', 'text/plain')
+        r = sonos.get(q.get('id', ''))
+        if not r:
+            self.send_response(404); self.send_header('Access-Control-Allow-Origin', '*'); self.end_headers(); return
+        if what == 'now':
+            e = int((time.time() - r['t0']) * 1000) if r['state'] == 'playing' else r.get('at', 0)
+            t = r['title'] + ('' if r['track'] == 1 else ' %d' % r['track'])
+            return self.reply(json.dumps({'state': r['state'], 'app': 'Sonos ' + ('Living Room' if not r['radio'] else 'Kitchen + 1'),
+                'title': t, 'artist': r['artist'], 'album': r['album'], 'elapsed_ms': min(e, r['total']) if r['total'] else 60000,
+                'total_ms': r['total'], 'can_seek': not r['radio'], 'can_next': not r['radio'], 'can_prev': not r['radio'],
+                'can_shuffle': not r['radio'], 'can_repeat': not r['radio'], 'shuffle': r['shuffle'], 'repeat': r['repeat'],
+                'volume': r['volume'], 'muted': r['muted'], 'art': 0 if r['radio'] else 1000 + r['track']}))
+        if what == 'art':
+            return self.reply(open(os.path.join(os.path.dirname(MP3), 'cover.png') if os.path.exists(os.path.join(os.path.dirname(MP3), 'cover.png'))
+                                   else os.path.join(MUSIC, 'Album', 'cover.png'), 'rb').read(), 'image/png')
+        sonos_log.append('%s %s' % (q.get('id'), '&'.join('%s=%s' % (k, v) for k, v in sorted(q.items()) if k != 'id')))
+        if what == 'cmd':
+            c = q.get('c')
+            if c == 'pause' and r['state'] == 'playing': r['at'] = int((time.time() - r['t0']) * 1000); r['state'] = 'paused'
+            elif c == 'play' and r['state'] != 'playing': r['t0'] = time.time() - r.get('at', 0) / 1000; r['state'] = 'playing'
+            elif c == 'next': r['track'] += 1; r['t0'] = time.time(); r['at'] = 0
+            elif c == 'prev': r['track'] = max(1, r['track'] - 1); r['t0'] = time.time(); r['at'] = 0
+            elif c == 'seek': r['t0'] = time.time() - int(q.get('ms', 0)) / 1000; r['at'] = int(q.get('ms', 0))
+            elif c == 'shuffle': r['shuffle'] = q.get('on') == '1'
+            elif c == 'repeat': r['repeat'] = int(q.get('on', 0))
+            return self.reply('ok\n', 'text/plain')
+        if what == 'vol':
+            if 'v' in q: r['volume'] = int(q['v'])
+            if 'm' in q: r['muted'] = q['m'] == '1'
+            return self.reply('ok\n', 'text/plain')
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         q = dict(urllib.parse.parse_qsl(u.query))
         p = u.path
+        if p.startswith('/sonos/'):
+            return self.sonos(p[7:], q)
         if p == '/json/countries':
             self.reply(json.dumps([{"name": "Germany", "iso_3166_1": "DE", "stationcount": 5000},
                                    {"name": "Netherlands", "iso_3166_1": "NL", "stationcount": 1500},

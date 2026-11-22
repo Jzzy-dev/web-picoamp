@@ -102,7 +102,8 @@ try:
       load()
       out = run('wait 300; key Home; list; key Enter; wait 100; list')
       shot('start')
-      check('the page starts (wasm)', out, r'list / \(2\)')
+      check('the page starts (wasm)', out, r'list / \(3\)')
+      check('top: Sonos', out, r'1 Sonos')
       check('top: internet radio', out, r'1 Internet radio')
       check('top: choose a music folder', out, r'1 Choose a music folder')
       check('internet radio: the lists', out, r'list /Internet radio \(\d+\).*[\s\S]*1 Favourites[\s\S]*1 Top stations[\s\S]*1 Stations')
@@ -382,6 +383,30 @@ try:
       page.goto(URL)
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
 
+
+      # Sonos, through PicoAmp for Windows (the stand-in for its bridge): the rooms, one followed as the
+      # player (its song, time, cover, the keys to it), a station (no next), back to the page's own music
+      page.goto(URL + '&bridge=' + SVC)
+      page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
+      out = run('wait 300; key Esc; key BS; key BS; key End; key Enter; wait 800; list; key End; key Enter; wait 1800; status; key V; key V; wait 600; page; '
+                'key Space; wait 1300; status; key N; wait 1300; status; key -; key M; wait 1300; status; key H; wait 1200; status; '
+                'key Home; key Down; key Enter; wait 1600; status; key N; key +; wait 1300; status')
+      shot('sonos')
+      check('sonos: the rooms', out, r'list /Sonos \(3\)[\s\S]*9 Kitchen \+ 1[\s\S]*9 Living Room')
+      check('sonos: a room as the player', out, r"state=1 elapsed=\d+/210 .*vol=30 title='Fake Song' artist='Fake Artist' album='Fake Album'")
+      check('sonos: its cover', out, r'page 0 cover=ready')
+      check('sonos: Space pauses it', out, r"state=2 .*title='Fake Song'")
+      check('sonos: N its next song', out, r"title='Fake Song 2'")
+      check('sonos: volume and mute', out, r"vol=25 .*title='Fake Song 2'.* muted=1")
+      check('sonos: shuffle', out, r"title='Fake Song 2'.* mode=2")
+      check('sonos: a station', out, r"state=1 elapsed=60/0 .*vol=45 title='Radio Song' artist='Radio Artist' album='Radio Fake'")
+      told = page.evaluate('u => fetch(u).then(r => r.text())', SVC + '/sonos/log')
+      check('sonos: told: pause, next, volume, mute, shuffle', told, r'RINCON_A c=pause&on=0\nRINCON_A c=next&on=0\nRINCON_A v=25\n(RINCON_A m=1\n)?[\s\S]*RINCON_A c=shuffle&on=1')
+      check_not('sonos: a station: no next', told, r'RINCON_B c=next')
+      check('sonos: the group\'s volume', told, r'RINCON_B v=45')
+      out = run('key BS; key Home; key Enter; wait 200; key Home; key Down; key Down; key Down; key Down; key Down; key Down; key Down; key Enter; wait 1500; status')
+      page.goto(URL + '&bridge=off')
+      page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
 
       # the codecs the browser plays
       codecs = page.evaluate('''() => ["MP3","AAC","OGG","OPUS","FLAC"].map(c => c + "=" + (new Audio().canPlayType({MP3:"audio/mpeg",AAC:"audio/aac",OGG:"audio/ogg; codecs=\\"vorbis\\"",OPUS:"audio/ogg; codecs=\\"opus\\"",FLAC:"audio/flac"}[c]) || "no")).join(" ")''')
