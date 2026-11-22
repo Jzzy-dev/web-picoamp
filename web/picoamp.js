@@ -1187,8 +1187,91 @@ document.getElementById('lists-export').onclick = () => {
 document.getElementById('lists-close').onclick = () => dlg.close();
 dlg.addEventListener('close', () => { saveCurrent(); X.web_reload(); save(); canvas.focus(); });
 
+// ---------------- the TV (the Android app, or ?tv=1): its remote ----------------
+// The remote has the arrows, OK, Back, and sometimes play/pause and the like: the arrows and OK are
+// the keys', Back goes back (ESC, then the folder up; at the top the app leaves), and OK held opens
+// the menu with what the letter keys do. The app calls picoamp.tv(action); a keyboard here (?tv=1):
+// Enter held is OK held.
+const tvMode = params.get('tv') === '1' || !!window.PicoAmpAndroid;
+const tvMenu = document.getElementById('tvmenu'), tvGrid = document.getElementById('tvgrid');
+const ch = c => c.charCodeAt(0);
+function tvSearch() {
+    const t = (prompt('Search the station directory') || '').trim();
+    if (!t) return;
+    X.web_key(ch('/'));
+    for (const c of t) if (c.charCodeAt(0) >= 32 && c.charCodeAt(0) < 127) X.web_key(c.charCodeAt(0));
+    X.web_key(K.ENTER);
+}
+function tvPlayer() { for (let i = 0; i < 4 && X.web_back_level() === 0; i++) X.web_key(K.ESC); }
+const TV_ITEMS = [
+    ['Player', tvPlayer], ['Internet radio', () => withStr('radio:', p => X.web_goto(p))],
+    ['Sonos', () => withStr('sonos:', p => X.web_goto(p))], ['Search stations', tvSearch],
+    ['Clock', () => X.web_key(ch('C'))], ['Weather', () => X.web_key(ch('W'))], ['News', () => X.web_key(ch('T'))], ['Markets', () => X.web_key(ch('$'))],
+    ['Spectrum / cover', () => { tvPlayer(); X.web_key(ch('V')); }], ['Full screen', () => X.web_key(ch('Z'))],
+    ['Equalizer', () => { tvPlayer(); X.web_key(ch('G')); }], ['Pictures', () => X.web_key(ch('I'))],
+    ['Play / pause', () => X.web_key(K.PLAY)], ['Next', () => X.web_key(K.NEXT)], ['Previous', () => X.web_key(K.PREV)], ['Stop', () => X.web_key(K.STOP)],
+    ['Shuffle', () => X.web_key(ch('H'))], ['Repeat', () => X.web_key(ch('R'))], ['Mute', () => X.web_key(K.MUTE)], ['Help: the keys', () => X.web_key(K.F1)],
+];
+let tvSel = 0;
+for (const [name] of TV_ITEMS) { const d = document.createElement('div'); d.textContent = name; tvGrid.appendChild(d); }
+function tvShow() { [...tvGrid.children].forEach((d, i) => d.classList.toggle('on', i === tvSel)); }
+function tvOpen(on) { tvMenu.hidden = !on; if (on) tvShow(); }
+function tv(action) {
+    if (!X) return 'ok';
+    ensureCtx();
+    hideHint();
+    const cols = 4, n = TV_ITEMS.length;
+    if (!tvMenu.hidden) {
+        if (action === 'left') tvSel = (tvSel + n - 1) % n;
+        else if (action === 'right') tvSel = (tvSel + 1) % n;
+        else if (action === 'up') tvSel = (tvSel + n - cols) % n;
+        else if (action === 'down') tvSel = (tvSel + cols) % n;
+        else if (action === 'ok') { tvOpen(false); TV_ITEMS[tvSel][1](); return 'ok'; }
+        else if (action === 'back' || action === 'menu' || action === 'longok') tvOpen(false);
+        tvShow();
+        return 'ok';
+    }
+    const keys = { up: K.UP, down: K.DOWN, left: K.LEFT, right: K.RIGHT, ok: K.ENTER, playpause: K.PLAY, play: K.PLAY, pause: K.PLAY,
+                   stop: K.STOP, next: K.NEXT, prev: K.PREV, ff: ch('.'), rew: ch(','), info: K.F1 };
+    if (action === 'longok' || action === 'menu') { tvOpen(true); return 'ok'; }
+    if (action === 'back') {
+        const lv = X.web_back_level();
+        if (lv === 2) return 'exit';
+        X.web_key(lv === 1 ? K.BS : K.ESC);
+        return 'ok';
+    }
+    if (keys[action] !== undefined) X.web_key(keys[action]);
+    return 'ok';
+}
+let tvHold = null;
+if (tvMode) {
+    // a keyboard (the tests, a TV with one): the arrows, Enter (held: the menu), Escape and Backspace as the remote's
+    window.addEventListener('keydown', e => {
+        const a = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Escape: 'back', ContextMenu: 'menu' }[e.key];
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!e.repeat && !tvHold) tvHold = setTimeout(() => { tvHold = 'long'; tv('longok'); }, 600);
+            return;
+        }
+        if (!tvMenu.hidden || a === 'back' || a === 'menu') {
+            if (!a && tvMenu.hidden) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (a && tv(a) === 'exit') window.PicoAmpAndroid?.exit?.();
+        }
+    }, true);
+    window.addEventListener('keyup', e => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        if (tvHold && tvHold !== 'long') { clearTimeout(tvHold); tv('ok'); }
+        tvHold = null;
+    }, true);
+}
+
 // ---------------- the hint (sound needs a key or a click first) ----------------
 const hint = document.getElementById('hint');
+if (tvMode && hint) hint.textContent = 'Hold OK for the menu \u00b7 Back goes back';
 function hideHint() { if (hint) hint.hidden = true; }
 setTimeout(hideHint, 10000);
 
@@ -1202,6 +1285,8 @@ window.picoamp = {
     },
     fs: { get: fsGet, set: fsSet, list: fsList },
     key: k => X.web_key(k),
+    tv,                                   // the TV's remote (the Android app): 'up' 'down' 'left' 'right' 'ok' 'longok' 'back' 'menu' 'playpause' ...; 'exit': leave
+    get tvMenuOpen() { return !tvMenu.hidden; },
     save: () => X.web_save(),
     stopSaving() { saving = false; },     // (the tests: the settings are changed under it)
     hideHint,

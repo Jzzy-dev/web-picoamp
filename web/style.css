@@ -23,3 +23,13 @@ button { cursor: pointer; }
 button:hover, button:focus-visible { background: #2424db; }
 button.main { background: #24b624; border-color: #6dff6d; color: #000; }
 :focus-visible { outline: 2px solid #ffff24; outline-offset: 1px; }
+
+/* the TV's menu (the Android app, ?tv=1): MSX colours, big enough to read from the sofa */
+#tvmenu { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #000049; border: 4px solid #6dffff;
+  padding: 1.2vw 1.6vw; font: bold 1.6vw/1.25 ui-monospace, Consolas, monospace; color: #6dffff; text-transform: uppercase; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .45); }
+#tvmenu[hidden] { display: none; }
+#tvmenu h2 { margin: 0 0 .6vw; font-size: 1em; color: #ffff24; letter-spacing: .12em; }
+#tvmenu p { margin: .8vw 0 0; font-size: .6em; color: #b6b6b6; letter-spacing: .05em; }
+#tvgrid { display: grid; grid-template-columns: repeat(4, 19vw); gap: .4vw; }
+#tvgrid div { padding: .35vw .6vw; border: 2px solid #24246d; white-space: nowrap; overflow: hidden; }
+#tvgrid div.on { background: #6dffff; color: #000049; border-color: #ffff24; }

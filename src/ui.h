@@ -18,6 +18,8 @@ enum { MOUSE_LEFT = 1, MOUSE_RIGHT = 2, MOUSE_WHEEL_UP = 4, MOUSE_WHEEL_DOWN = 5
 void ui_init(void);
 void ui_frame(void);                      // once a frame: read the player, draw
 void ui_key(int key);
+int  ui_back_level(void);                 // the TV's Back: 0 ESC, 1 the list's folder up, 2 at the top
+void ui_goto(const char *place);         // the player, the list at this place ("radio:", "sonos:")
 void ui_mouse(int x, int y, int button);  // x, y in the 256 x 192 picture
 void ui_drop(const char *const *paths, int n);   // files dropped on the window
 void ui_message(const char *text, bool error);

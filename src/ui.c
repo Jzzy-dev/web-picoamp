@@ -1311,3 +1311,21 @@ void ui_init(void)
     if (!list.ok) open_place("", NULL);
     (void)playing_place;
 }
+
+// ---------------- the TV's remote (the Android app; ?tv=1) ----------------
+// where Back goes: 0 something to close (ESC), 1 the player with the list in a folder (BS: up), 2 the top
+int ui_back_level(void)
+{
+    if (help_on || eq_open || searching || page != PG_PLAYER) return 0;
+    return list.place[0] ? 1 : 2;
+}
+
+// a place of the list (the menu's Internet radio, Sonos): the player and that folder
+void ui_goto(const char *place)
+{
+    help_on = false;
+    eq_open = false;
+    searching = false;
+    ui_page(PG_PLAYER);
+    open_place(place, NULL);
+}

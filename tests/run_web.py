@@ -408,6 +408,27 @@ try:
       page.goto(URL + '&bridge=off')
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
 
+      # the TV (the Android app, ?tv=1): the remote's arrows and OK, OK held: the menu, Back
+      page.goto(URL + '&tv=1&bridge=' + SVC)
+      page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
+      run('wait 200')
+      backs = [page.evaluate("picoamp.tv('back')") for _ in range(4)]
+      check('tv: Back goes up the folders, at the top it leaves', ' '.join(backs), r'^(ok )*exit')
+      page.keyboard.down('Enter'); time.sleep(0.9); page.keyboard.up('Enter')
+      check('tv: OK held opens the menu', str(page.evaluate('picoamp.tvMenuOpen')), 'True')
+      shot('tv_menu')
+      for a in ['right', 'right', 'ok']: page.evaluate('a => picoamp.tv(a)', a)
+      out = run('wait 1200; list')
+      check('tv: the menu: Sonos', out, r'list /Sonos \(3\)')
+      page.evaluate("picoamp.tv('longok')"); page.evaluate("picoamp.tv('down')"); page.evaluate("picoamp.tv('ok')")
+      check('tv: the menu: the news (the menu remembers its place)', run('wait 300; page'), r'^page 4')
+      check('tv: Back closes the page', (page.evaluate("picoamp.tv('back')"), run('page'))[1], r'^page 0')
+      check('tv: Back: the folder up', page.evaluate("picoamp.tv('back')") + ' ' + run('list'), r'^ok list / \(3\)')
+      page.keyboard.press('Enter')
+      check('tv: OK opens Sonos (short press)', run('wait 1200; list'), r'list /Sonos')
+      page.goto(URL + '&bridge=off')
+      page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
+
       # the codecs the browser plays
       codecs = page.evaluate('''() => ["MP3","AAC","OGG","OPUS","FLAC"].map(c => c + "=" + (new Audio().canPlayType({MP3:"audio/mpeg",AAC:"audio/aac",OGG:"audio/ogg; codecs=\\"vorbis\\"",OPUS:"audio/ogg; codecs=\\"opus\\"",FLAC:"audio/flac"}[c]) || "no")).join(" ")''')
       print('     browser codecs: ' + codecs)
