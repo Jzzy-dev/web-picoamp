@@ -17,6 +17,16 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
 
 *(The screenshots come from the tests, with their test music, stations and places.)*
 
+## Spotify, other players and Sonos
+
+* **Sonos:** the Sonos entry at the top of the list makes this page the screen and remote of a
+  room of the house (song, time, cover, the keys and the volume), through
+  [PicoAmp for Windows](https://github.com/Jzzy-dev/win-picoamp) on a PC in the same network.
+  On a phone or a tablet, open `http://<the PC>:8765/web/`. See Sonos under What it does.
+* **Spotify and other players** of a PC are followed by PicoAmp for Windows (through Windows's
+  media controls; a web page cannot see other programs) and by PicoAmp on the MSX through its
+  MSX link; this page does not follow them (yet).
+
 ## What it does
 
 * **Your own music:** an entry at the top picks a folder (Chrome and Edge remember it between visits;
