@@ -1192,7 +1192,7 @@ dlg.addEventListener('close', () => { saveCurrent(); X.web_reload(); save(); can
 // the keys', Back goes back (ESC, then the folder up; at the top the app leaves), and OK held opens
 // the menu with what the letter keys do. The app calls picoamp.tv(action); a keyboard here (?tv=1):
 // Enter held is OK held.
-const tvMode = params.get('tv') === '1' || !!window.PicoAmpAndroid;
+const tvMode = params.get('tv') === '1';
 const tvMenu = document.getElementById('tvmenu'), tvGrid = document.getElementById('tvgrid');
 const ch = c => c.charCodeAt(0);
 function tvSearch() {
