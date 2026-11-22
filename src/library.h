@@ -5,6 +5,7 @@
 //   ""                the top: [Internet radio], [Music], the drives
 //   "radio:"          the station lists: every .m3u / .pls in <settings>\Radio
 //   "radio:Name.m3u"  the stations of one list
+//   "sonos:"          the Sonos rooms, through PicoAmp for Windows (sonos_web.c)
 //   "rb:..."          the Radio Browser directory: rb:top, rb:votes, rb:trend,
 //                     rb:countries, rb:genres, rb:decades, rb:country=NL|Name,
 //                     rb:genre=jazz, rb:decade=80s|1980s, rb:search=text
@@ -13,7 +14,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-enum { E_PARENT = 0, E_FOLDER = 1, E_FILE = 2, E_STATION = 6, E_MORE = 7 };
+enum { E_PARENT = 0, E_FOLDER = 1, E_FILE = 2, E_STATION = 6, E_MORE = 7, E_SONOS = 9 };   // E_SONOS: a Sonos room (target sonos:<id>)
 
 typedef struct
 {

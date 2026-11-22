@@ -262,6 +262,7 @@ static void activate(void)
         return;
     }
     if (e->type == E_FOLDER) { open_place(e->target, NULL); return; }
+    if (e->type == E_SONOS || (e->type == E_STATION && !strncmp(e->target, "sonos:", 6))) { audio_follow_sonos(e->target + 6); return; }
     if (e->type == E_STATION)
     {
         // the list's stations are the play list, as on the MSX (N / P)
@@ -366,8 +367,17 @@ static void draw_static(void)
     gfx_str(23, 20, "VOL", 3, A_BAR);
 }
 
+static void upper(char *s) { for (; *s; s++) if (*s >= 'a' && *s <= 'z') *s -= 32; }
+
 static void fmt_format(char *out, size_t n)
 {
+    if (st.system)
+    {
+        // a Sonos room: its name
+        u_copy(out, n, st.source[0] ? st.source : "SONOS");
+        upper(out);
+        return;
+    }
     if (st.buffering) { if (st.buf_pct) snprintf(out, n, "BUFFERING %d%%", st.buf_pct); else snprintf(out, n, "BUFFERING"); return; }
     out[0] = 0;
     if (!st.bitrate && !st.rate && !st.stream) return;
@@ -410,6 +420,13 @@ static void draw_info(void)
     char line[300];
     bool name = st.state == ST_PLAYING && st.stream && st.album[0] && ((sys_millis() / 1067) & 3) != 3;
     if (name) u_copy(line, sizeof line, st.album);
+    else if (st.system)
+    {
+        char a[64];
+        u_copy(a, sizeof a, st.source[0] ? st.source : "SONOS");
+        upper(a);
+        snprintf(line, sizeof line, "%s %s", st.state == ST_PLAYING ? "PLAYING" : st.state == ST_PAUSED ? "PAUSED" : "STOPPED", a);
+    }
     else if (st.state == ST_PLAYING) snprintf(line, sizeof line, "PLAYING %d/%d", st.pl_pos + 1, st.pl_count);
     else u_copy(line, sizeof line, st.state == ST_PAUSED ? "PAUSED" : "STOPPED");
     gfx_str(0, 11, line, 19, A_TITLE);
@@ -588,8 +605,41 @@ void ui_song(const uint8_t *data, size_t len)
     else if (st.stream && song_shown) back_to_logo();
 }
 
+// a Sonos room: the picture it gives (a default meanwhile, then its cover online when it has none)
+static unsigned sys_art_seen;
+static bool     sys_art_shown;
+
+static void cover_follow_system(void)
+{
+    uint8_t *d;
+    size_t n;
+    char k[sizeof cover_for];
+    snprintf(k, sizeof k, "system\x1f%s\x1f%s\x1f%s\x1f%s", st.source, st.title, st.artist, st.album);
+    if (!cover_asked || strcmp(cover_for, k))
+    {
+        bool first = !cover_asked || strncmp(cover_for, "system\x1f", 7);
+        u_copy(cover_for, sizeof cover_for, k);
+        cover_asked = true;
+        new_item();
+        sys_art_shown = false;
+        if (first) { sys_art_seen = st.art_gen - 1; show_default(); }
+        if (!st.title[0]) { show_default(); return; }
+    }
+    if (st.art_gen != sys_art_seen)
+    {
+        sys_art_seen = st.art_gen;
+        if (audio_follow_art(&d, &n)) { cover_from_bytes(d, n); free(d); sys_art_shown = true; }
+        else if (!sys_art_shown && st.title[0])
+        {
+            show_default();
+            ask_song(st.artist, st.album[0] ? st.album : st.title, st.album[0] != 0);
+        }
+    }
+}
+
 static void cover_follow(void)
 {
+    if (st.system) { cover_follow_system(); return; }
     if (st.stream)
     {
         // a station: a default picture, its logo, the song's cover over it
@@ -975,10 +1025,22 @@ static void set_eq_preset(int p)
 
 void ui_eq_next(void) { set_eq_preset(eq_preset >= EQ_PRESETS ? 0 : eq_preset + 1); }
 
-static void set_mode(int m)
+// shuffle / repeat: the player's (kept), or the Sonos room's
+static void toggle_mode(int bit)
 {
-    cfg.mode = m;
+    int m = st.mode ^ bit;
+    if (!st.system) cfg.mode = m;
     audio_set_mode(m);
+}
+
+// the volume: the player's, or the Sonos room's while one is followed
+static int vol_now(void) { return st.system ? st.volume : cfg.volume; }
+
+static void vol_set(int v)
+{
+    v = v < 0 ? 0 : v > 100 ? 100 : v;
+    if (!st.system) cfg.volume = v;
+    audio_set_volume(v);
 }
 
 // the keys that work on every page
@@ -993,21 +1055,20 @@ bool ui_playback_key(int k)
     case 'N': case K_MEDIA_NEXT: audio_next(); return true;
     case 'P': case K_MEDIA_PREV: audio_prev(); return true;
     case '+': case '=': case K_VOL_UP:
-        cfg.volume = cfg.volume + 5 > 100 ? 100 : cfg.volume + 5;
-        audio_set_volume(cfg.volume);
+        vol_set(vol_now() + 5);
         return true;
     case '-': case K_VOL_DOWN:
-        cfg.volume = cfg.volume < 5 ? 0 : cfg.volume - 5;
-        audio_set_volume(cfg.volume);
+        vol_set(vol_now() - 5);
         return true;
     case 'M': case K_VOL_MUTE:
+        if (st.system) { audio_set_mute(!st.muted); return true; }
         cfg.muted = !cfg.muted;
         audio_set_mute(cfg.muted);
         return true;
     case ',': case '<': audio_seek_rel(-10); return true;
     case '.': case '>': audio_seek_rel(10); return true;
-    case 'H': set_mode(cfg.mode ^ MODE_SHUFFLE); return true;
-    case 'R': set_mode(cfg.mode ^ MODE_REPEAT); return true;
+    case 'H': toggle_mode(MODE_SHUFFLE); return true;
+    case 'R': toggle_mode(MODE_REPEAT); return true;
     case 'E': ui_eq_next(); return true;
     case 'Q': quit_req = true; plat_quit(); return true;
     }
@@ -1156,8 +1217,8 @@ void ui_mouse(int x, int y, int button)
         case 5: audio_stop(); return;
         case 6: audio_seek_rel(10); return;
         case 7: audio_next(); return;
-        case 9: case 10: case 11: set_mode(cfg.mode ^ MODE_SHUFFLE); return;
-        case 13: case 14: case 15: set_mode(cfg.mode ^ MODE_REPEAT); return;
+        case 9: case 10: case 11: toggle_mode(MODE_SHUFFLE); return;
+        case 13: case 14: case 15: toggle_mode(MODE_REPEAT); return;
         case 17: case 18: eq_open = !eq_open; return;
         case 20: case 21: case 22: ui_playback_key('M'); return;
         default:
@@ -1165,10 +1226,9 @@ void ui_mouse(int x, int y, int button)
             {
                 // a cell of the volume: up to it (the first cell again: 0)
                 int v = (col - 24) * 12 + 12;
-                if (col == 24 && cfg.volume <= 12) v = 0;
-                cfg.volume = v > 100 ? 100 : v;
-                if (col == 31) cfg.volume = 100;
-                audio_set_volume(cfg.volume);
+                if (col == 24 && vol_now() <= 12) v = 0;
+                if (col == 31) v = 100;
+                vol_set(v);
             }
         }
     }

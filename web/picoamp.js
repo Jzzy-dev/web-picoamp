@@ -26,6 +26,22 @@ const relay = (() => {
     return r === 'off' ? '' : r.replace(/\?url=$/, '').replace(/\/?$/, '/');
 })();
 const relayed = u => relay + '?url=' + encodeURIComponent(u);
+// the Sonos bridge: PicoAmp for Windows (its link server, K), which asks the speakers for this page.
+// bridge=http://<the PC>:8765 in the address (kept; bridge=off forgets it); the page's own address
+// when the PC itself serves it (http://<the PC>:8765/web/); else none named (the Sonos entry then
+// asks http://localhost:8765 when it is opened).
+const bridge = (() => {
+    let b = params.get('bridge');
+    try {
+        if (b === 'off') localStorage.removeItem('picoamp-bridge');
+        else if (b && /^https?:\/\/[^/]+/i.test(b)) localStorage.setItem('picoamp-bridge', b.replace(/\/+$/, ''));
+        b = localStorage.getItem('picoamp-bridge');
+    } catch { if (b === 'off') b = null; }
+    if (!b && location.protocol === 'http:' && location.pathname.startsWith('/web/')) b = location.origin;
+    return b || '';
+})();
+// an http address of this network from a page on https (Chrome: the person is asked once)
+const isLocal = u => /^http:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[^/]*\.local[:/])/i.test(u);
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 let wasm, mem, X;            // the instance's memory and exports
@@ -61,6 +77,7 @@ function writeOut(s, out, max) {
 const envMap = { rb: 'PICOAMP_RB', meteo: 'PICOAMP_METEO', geo: 'PICOAMP_GEO', ipapi: 'PICOAMP_IPAPI' };
 const env = [];
 for (const [k, v] of Object.entries(envMap)) if (params.get(k)) env.push(`${v}=${params.get(k)}`);
+if (bridge) env.push(`PICOAMP_BRIDGE=${bridge}`);
 const lineBuf = { 1: '', 2: '' };
 const wasi = {
     // the time (C's time(), clock()): realtime, else the page's own clock; nanoseconds
@@ -549,7 +566,9 @@ function js_fetch(id, p, n) {
         }
         url = relayed(url.slice(6));
     }
-    fetch(url, { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined }).then(async r => {
+    const opt = { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined };
+    if (isLocal(url) && location.protocol === 'https:') opt.targetAddressSpace = /^http:\/\/(localhost|127\.)/i.test(url) ? 'loopback' : 'local';
+    fetch(url, opt).then(async r => {
         const b = new Uint8Array(await r.arrayBuffer());
         return [r.status, b, ''];
     }).catch(e => [0, new Uint8Array(0), navigator.onLine === false ? 'No internet connection' : e && e.name === 'TimeoutError' ? 'No answer in 20 seconds' : 'No answer (blocked or offline)'])

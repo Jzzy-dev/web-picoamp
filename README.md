@@ -17,6 +17,16 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
 
 *(The screenshots come from the tests, with their test music, stations and places.)*
 
+## Spotify, other players and Sonos
+
+* **Sonos:** the Sonos entry at the top of the list makes this page the screen and remote of a
+  room of the house (song, time, cover, the keys and the volume), through
+  [PicoAmp for Windows](https://github.com/Jzzy-dev/win-picoamp) on a PC in the same network.
+  On a phone or a tablet, open `http://<the PC>:8765/web/`. See Sonos under What it does.
+* **Spotify and other players** of a PC are followed by PicoAmp for Windows (through Windows's
+  media controls; a web page cannot see other programs) and by PicoAmp on the MSX through its
+  MSX link; this page does not follow them (yet).
+
 ## What it does
 
 * **Your own music:** an entry at the top picks a folder (Chrome and Edge remember it between visits;
@@ -70,6 +80,17 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
   and the news reader (feeds by topic, My feeds, the full story). Both need [the relay](#the-relay):
   their sites do not let other pages read them. Without it they say so.
   * A feed list (OPML) dropped on the page goes into My feeds.
+* **Sonos:** **Sonos** at the top of the list shows the rooms of the house and makes PicoAmp the screen
+  and remote of one: its song, time and cover, play / pause, next, previous, seeking, shuffle, repeat,
+  the volume and mute. The sound stays on the speakers (the bars move on a pretend sound).
+  * A web page cannot reach the speakers itself (it cannot search the network, and a page on https may
+    not ask an http address there), so [PicoAmp for Windows](https://github.com/Jzzy-dev/win-picoamp)
+    on a PC in the same network asks them for it: turn on its MSX link (**K**) there.
+  * On that PC: this page finds it at `http://localhost:8765` (Chrome asks once whether the page may
+    reach apps on this device).
+  * On a phone or a tablet: open `http://<the PC>:8765/web/`. The PC serves this page itself, and Sonos
+    goes through it. (A page on http cannot pick a music folder; the radio and Sonos work.)
+  * Elsewhere: `?bridge=http://<the PC>:8765` in the address (kept; `?bridge=off` forgets it).
 * **Media keys and the lock screen:** play/pause, next and previous work through the browser.
 * **Any window size:** fit at 4:3 and sharp (whole-pixel enlargement, only the last step smoothed).
   F2 switches to whole multiples or stretch, F3 adds scan lines, and F11, Alt+Enter or a double click
@@ -131,7 +152,7 @@ make test                           # the tests in headless Chromium (needs ffmp
 * `web/` is the whole site: `index.html`, `picoamp.js` (the page: picture, keys, sound, storage, files),
   `style.css` and `picoamp.wasm`.
 * `src/` is the C program. Most of it is shared with PicoAmp for Windows. `web.c` is its link to the
-  page, `audio_web.c` the player. `mktsvc.c` and `newsfeed.c` fetch in a thread on Windows and through
+  page, `audio_web.c` the player, `sonos_web.c` Sonos through PicoAmp for Windows. `mktsvc.c` and `newsfeed.c` fetch in a thread on Windows and through
   the relay here (`__wasm__`).
 * The services' addresses can be changed for tests: `?rb=…&meteo=…&geo=…&ipapi=…`.
 

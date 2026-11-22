@@ -13,6 +13,7 @@
 #include "web.h"
 #include "viz.h"
 #include "cover.h"
+#include "sonos.h"
 
 static audio_status st;
 static char **pl;                   // files, or "url\x1Fname" for stations
@@ -22,6 +23,130 @@ static int   volume = 80, balance = 50, fade = 1000;
 static bool  muted;
 
 static void changed(void) { st.gen++; }
+
+// ---------------- a Sonos room (sonos_web.c) ----------------
+static bool     following;
+static char     fol_id[64];
+static np_info  sys_now;
+static uint32_t bars_at, bars_rng = 12345;
+static float    bars_lp[4], bars_env, bars_beat, bars_amp[4] = { 1.0f, 0.6f, 0.35f, 0.2f };
+static void     free_playlist(void);
+
+static void sys_leave(bool pause_it)
+{
+    if (!following) return;
+    if (pause_it && sys_now.state == NP_PLAYING) sonos_cmd(NP_PAUSE, 0);
+    sonos_tick();                       // (the key goes out before the room is let go)
+    following = false;
+    sonos_end();
+    fol_id[0] = 0;
+    st.system = false;
+    st.source[0] = st.title[0] = st.artist[0] = st.album[0] = st.url[0] = 0;
+    st.state = ST_STOPPED;
+    st.elapsed = st.total = 0;
+    st.volume = volume;
+    st.muted = muted;
+    st.seekable = false;
+    changed();
+}
+
+void audio_follow_sonos(const char *id)
+{
+    if (following && !strcmp(id, fol_id)) return;
+    if (following) sys_leave(false);
+    js_audio_stop();
+    free_playlist();
+    following = true;
+    u_copy(fol_id, sizeof fol_id, id);
+    sonos_start(id);
+    memset(&sys_now, 0, sizeof sys_now);
+    st.system = true;
+    st.stream = st.buffering = st.tls = false;
+    st.state = ST_STOPPED;
+    st.title[0] = st.artist[0] = st.album[0] = 0;
+    st.bitrate = st.rate = st.channels = 0;
+    st.pl_pos = st.pl_count = 0;
+    snprintf(st.url, sizeof st.url, "sonos:%s", id);
+    cover_none();
+    changed();
+}
+
+bool audio_follow_art(uint8_t **data, size_t *len) { return following && sonos_art(data, len); }
+
+static float bars_rand(void)
+{
+    bars_rng = bars_rng * 1664525u + 1013904223u;
+    return (float)((bars_rng >> 8) & 0xFFFF) / 32768.0f - 1.0f;
+}
+
+// the room's sound does not come here: the bars move on a pretend sound while it plays
+static void pretend_bars(void)
+{
+    uint32_t now = sys_millis();
+    if (sys_now.state != NP_PLAYING || sys_now.muted) { bars_at = now; return; }
+    if ((int32_t)(now - bars_at) > 100) bars_at = now - 10;
+    static int16_t pcm[480 * 2];
+    static const float cut[4] = { 0.02f, 0.08f, 0.25f, 0.6f };
+    float vol = sys_now.volume >= 0 ? 0.35f + 0.65f * (float)sys_now.volume / 100.0f : 1.0f;
+    while ((int32_t)(now - bars_at) >= 10)
+    {
+        bars_at += 10;
+        bars_beat += 0.02f + 0.002f * bars_rand();
+        if (bars_beat >= 1.0f) { bars_beat -= 1.0f; bars_env = 1.0f; }
+        bars_env *= 0.93f;
+        for (int k = 0; k < 4; k++)
+        {
+            bars_amp[k] += 0.03f * bars_rand();
+            if (bars_amp[k] < 0.1f) bars_amp[k] = 0.1f;
+            if (bars_amp[k] > 1.0f) bars_amp[k] = 1.0f;
+        }
+        for (int n = 0; n < 480; n++)
+        {
+            float w = bars_rand(), o = 0;
+            for (int k = 0; k < 4; k++)
+            {
+                bars_lp[k] += cut[k] * (w - bars_lp[k]);
+                float band = k ? bars_lp[k] - bars_lp[k - 1] : bars_lp[0] * (1.0f + 2.5f * bars_env);
+                o += band * bars_amp[k];
+            }
+            int v = (int)(o * 9000.0f * vol);
+            if (v > 32767) v = 32767;
+            if (v < -32768) v = -32768;
+            pcm[2 * n] = pcm[2 * n + 1] = (int16_t)v;
+        }
+        viz_feed(pcm, 480, 48000);
+    }
+}
+
+// what the room says now, as the player's status
+static void sys_poll(void)
+{
+    sonos_tick();
+    if (!following) return;
+    np_info i;
+    if (!sonos_get(&i)) return;
+    sys_now = i;
+    audio_status o = st;
+    st.state = i.state == NP_PLAYING ? ST_PLAYING : i.state == NP_PAUSED ? ST_PAUSED : ST_STOPPED;
+    u_copy(st.source, sizeof st.source, i.app);
+    u_copy(st.title, sizeof st.title, i.title);
+    u_copy(st.artist, sizeof st.artist, i.artist);
+    u_copy(st.album, sizeof st.album, i.album);
+    int e = i.elapsed_ms;
+    if (i.state == NP_PLAYING) e += (int)(sys_millis() - i.at);
+    if (i.total_ms && e > i.total_ms) e = i.total_ms;
+    st.elapsed = e / 1000;
+    st.total = i.total_ms / 1000;
+    st.seekable = i.can_seek && i.total_ms > 0;
+    st.mode = (i.shuffle ? MODE_SHUFFLE : 0) | (i.repeat != NP_REPEAT_OFF ? MODE_REPEAT : 0);
+    if (i.volume >= 0) { st.volume = i.volume; st.muted = i.muted; }
+    st.art_gen = i.art_gen;
+    unsigned g = st.gen;
+    st.gen = o.gen;
+    if (memcmp(&o, &st, sizeof st)) g++;
+    st.gen = g;
+    pretend_bars();
+}
 
 static void apply_gain(void)
 {
@@ -107,6 +232,7 @@ static void start_track(int i)
 
 void audio_play_files(const char *const *files, int count, int start)
 {
+    sys_leave(true);
     if (count <= 0) return;
     free_playlist();
     pl = malloc(sizeof *pl * (size_t)count);
@@ -118,6 +244,7 @@ void audio_play_files(const char *const *files, int count, int start)
 
 void audio_play_url(const char *url, const char *name)
 {
+    sys_leave(true);
     free_playlist();
     st.pl_pos = st.pl_count = 0;
     start_url(url, name);
@@ -125,6 +252,7 @@ void audio_play_url(const char *url, const char *name)
 
 void audio_play_stations(const char *const *urls, const char *const *names, int count, int start)
 {
+    sys_leave(true);
     if (count <= 0) return;
     free_playlist();
     pl = malloc(sizeof *pl * (size_t)count);
@@ -141,6 +269,7 @@ void audio_play_stations(const char *const *urls, const char *const *names, int 
 
 void audio_toggle_pause(void)
 {
+    if (following) { sonos_cmd(NP_TOGGLE, 0); return; }
     if (st.state == ST_STOPPED)
     {
         if (pl_n) start_track(pl_pos);
@@ -163,6 +292,7 @@ void audio_toggle_pause(void)
 
 void audio_stop(void)
 {
+    if (following) { sonos_cmd(NP_PAUSE, 0); return; }
     js_audio_stop();
     st.state = ST_STOPPED;
     st.buffering = false;
@@ -181,10 +311,11 @@ static int pick(int dir)
     return (pl_pos + dir + pl_n) % pl_n;
 }
 
-void audio_next(void) { if (pl_n) start_track(pick(1)); }
+void audio_next(void) { if (following) sonos_cmd(NP_NEXT, 0); else if (pl_n) start_track(pick(1)); }
 
 void audio_prev(void)
 {
+    if (following) { sonos_cmd(NP_PREV, 0); return; }
     if (!pl_n) return;
     if (!pl_stations && st.elapsed >= 3) { js_audio_seek(0); return; }   // back to the start first
     start_track(pick(-1));
@@ -192,6 +323,7 @@ void audio_prev(void)
 
 void audio_seek_to(int s)
 {
+    if (following) { sonos_cmd(NP_SEEK_TO, (s < 0 ? 0 : s) * 1000); return; }
     if (st.stream || st.state == ST_STOPPED) return;
     if (s < 0) s = 0;
     if (st.total && s >= st.total) s = st.total - 1;
@@ -202,19 +334,43 @@ void audio_seek_to(int s)
 
 void audio_seek_rel(int s) { audio_seek_to(st.elapsed + s); }
 
-void audio_set_volume(int v) { volume = v < 0 ? 0 : v > 100 ? 100 : v; st.volume = volume; apply_gain(); changed(); }
-void audio_set_mute(bool m) { muted = m; st.muted = m; apply_gain(); changed(); }
+void audio_set_volume(int v)
+{
+    v = v < 0 ? 0 : v > 100 ? 100 : v;
+    if (following && sys_now.volume >= 0) { sonos_volume(v, st.muted); st.volume = v; changed(); return; }
+    volume = v; st.volume = volume; apply_gain(); changed();
+}
+void audio_set_mute(bool m)
+{
+    if (following && sys_now.volume >= 0) { sonos_volume(st.volume, m); st.muted = m; changed(); return; }
+    muted = m; st.muted = m; apply_gain(); changed();
+}
 void audio_set_balance(int b) { balance = b < 0 ? 0 : b > 100 ? 100 : b; apply_gain(); }
 void audio_set_fade(int p) { p = p < 0 ? 0 : p > 1000 ? 1000 : p; if (p != fade) { fade = p; apply_gain(); } }
-void audio_set_mode(int m) { st.mode = m; changed(); }
+void audio_set_mode(int m)
+{
+    if (following)
+    {
+        // the room's shuffle and repeat (repeat: of its queue)
+        if ((m ^ st.mode) & MODE_SHUFFLE) sonos_cmd(NP_SHUFFLE, (m & MODE_SHUFFLE) != 0);
+        if ((m ^ st.mode) & MODE_REPEAT) sonos_cmd(NP_REPEAT, (m & MODE_REPEAT) ? NP_REPEAT_LIST : NP_REPEAT_OFF);
+    }
+    st.mode = m; changed();
+}
 void audio_set_eq(const int8_t g[EQ_BANDS]) { js_audio_eq(g[0], g[1], g[2], g[3], g[4]); }
 
-void audio_status_get(audio_status *s) { *s = st; }
+void audio_status_get(audio_status *s)
+{
+    if (following) sys_poll();
+    else sonos_tick();
+    *s = st;
+}
 
 // ---------------- what the page tells ----------------
 EXPORT(web_audio_playing)
 void web_audio_playing(int rate, int channels)
 {
+    if (following) return;                 // (the page's sound is not the room's)
     st.buffering = false;
     // (a station's own rate is not known here: the browser resamples it)
     if (!st.stream && !st.rate) { if (rate) st.rate = rate; if (channels) st.channels = channels; }
@@ -222,11 +378,12 @@ void web_audio_playing(int rate, int channels)
     changed();
 }
 
-EXPORT(web_audio_waiting) void web_audio_waiting(void) { st.buffering = true; changed(); }
+EXPORT(web_audio_waiting) void web_audio_waiting(void) { if (!following) { st.buffering = true; changed(); } }
 
 EXPORT(web_audio_time)
 void web_audio_time(double elapsed, double total)
 {
+    if (following) return;                 // (the page's sound is not the room's)
     int e = (int)elapsed, t = total > 0 && isfinite(total) ? (int)(total + 0.5) : 0;
     if (e != st.elapsed || t != st.total)
     {
@@ -237,11 +394,12 @@ void web_audio_time(double elapsed, double total)
     }
 }
 
-EXPORT(web_audio_bitrate) void web_audio_bitrate(int kbps) { st.bitrate = kbps; changed(); }
+EXPORT(web_audio_bitrate) void web_audio_bitrate(int kbps) { if (!following) { st.bitrate = kbps; changed(); } }
 
 EXPORT(web_audio_ended)
 void web_audio_ended(void)
 {
+    if (following) return;                 // (the page's sound is not the room's)
     // the end of a file: the next (repeat goes round; shuffle picks one)
     if (pl_n && !pl_stations)
     {
@@ -258,6 +416,7 @@ void web_audio_ended(void)
 EXPORT(web_audio_error)
 void web_audio_error(const char *msg)
 {
+    if (following) return;                 // (the page's sound is not the room's)
     js_audio_stop();
     st.state = ST_STOPPED;
     st.buffering = false;
@@ -268,6 +427,7 @@ void web_audio_error(const char *msg)
 EXPORT(web_audio_title)
 void web_audio_title(const char *t)
 {
+    if (following) return;                 // (the page's sound is not the room's)
     const char *d = strstr(t, " - ");
     if (d && d != t)
     {
