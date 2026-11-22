@@ -1043,6 +1043,7 @@ function draw() {
     g2.imageSmoothingEnabled = !exact;
     g2.imageSmoothingQuality = 'high';
     g2.drawImage(big, dest.x, dest.y, dest.w, dest.h);
+    tvFrame(g2, dest);
 }
 
 // ---------------- keys and the mouse ----------------
@@ -1188,10 +1189,17 @@ document.getElementById('lists-close').onclick = () => dlg.close();
 dlg.addEventListener('close', () => { saveCurrent(); X.web_reload(); save(); canvas.focus(); });
 
 // ---------------- the TV (the Android app, or ?tv=1): its remote ----------------
-// The remote has the arrows, OK, Back, and sometimes play/pause and the like: the arrows and OK are
-// the keys', Back goes back (ESC, then the folder up; at the top the app leaves), and OK held opens
-// the menu with what the letter keys do. The app calls picoamp.tv(action); a keyboard here (?tv=1):
-// Enter held is OK held.
+// The remote has the arrows, OK, Back, and sometimes play/pause and the like. On the player, a
+// white frame shows the part of the screen the arrows are in: Up/Down move it between the picture
+// (spectrum, scope, cover), the list and the control row; OK goes into that part:
+//   the picture   Left/Right: spectrum, scope, cover; OK on the cover: the cover big (full screen)
+//   the list      the arrows and OK as ever; Back: the folder up, at the top out of the list
+//   the controls  Left/Right choose (previous, 10 s back, play, pause, stop, 10 s on, next, shuffle,
+//                 repeat, EQ, volume), OK does it; on EQ the arrows set the equalizer, on the volume
+//                 Left/Right set it
+// Back comes out again (and at the top leaves the app: 'exit'). OK held (or the menu key) opens the
+// menu: the list's places and the other pages. The app calls picoamp.tv(action); a keyboard here
+// (?tv=1): Enter held is OK held, Escape is Back.
 const tvMode = params.get('tv') === '1';
 const tvMenu = document.getElementById('tvmenu'), tvGrid = document.getElementById('tvgrid');
 const ch = c => c.charCodeAt(0);
@@ -1203,44 +1211,124 @@ function tvSearch() {
     X.web_key(K.ENTER);
 }
 function tvPlayer() { for (let i = 0; i < 4 && X.web_back_level() === 0; i++) X.web_key(K.ESC); }
+const goto = place => () => { tvPlayer(); withStr(place, p => X.web_goto(p)); tvZone = 'list'; tvIn = true; };
 const TV_ITEMS = [
-    ['Player', tvPlayer], ['Internet radio', () => withStr('radio:', p => X.web_goto(p))],
-    ['Sonos', () => withStr('sonos:', p => X.web_goto(p))], ['Search stations', tvSearch],
-    ['Clock', () => X.web_key(ch('C'))], ['Weather', () => X.web_key(ch('W'))], ['News', () => X.web_key(ch('T'))], ['Markets', () => X.web_key(ch('$'))],
-    ['Spectrum / cover', () => { tvPlayer(); X.web_key(ch('V')); }], ['Full screen', () => X.web_key(ch('Z'))],
-    ['Equalizer', () => { tvPlayer(); X.web_key(ch('G')); }], ['Pictures', () => X.web_key(ch('I'))],
-    ['Play / pause', () => X.web_key(K.PLAY)], ['Next', () => X.web_key(K.NEXT)], ['Previous', () => X.web_key(K.PREV)], ['Stop', () => X.web_key(K.STOP)],
-    ['Shuffle', () => X.web_key(ch('H'))], ['Repeat', () => X.web_key(ch('R'))], ['Mute', () => X.web_key(K.MUTE)], ['Help: the keys', () => X.web_key(K.F1)],
+    ['Internet radio', goto('radio:')], ['Sonos', goto('sonos:')], ['Search stations', () => { tvPlayer(); tvSearch(); tvZone = 'list'; tvIn = true; }],
+    ['Clock', () => X.web_key(ch('C'))], ['Weather', () => X.web_key(ch('W'))], ['News', () => X.web_key(ch('T'))],
+    ['Markets', () => X.web_key(ch('$'))], ['Pictures', () => X.web_key(ch('I'))], ['Help: the keys', () => X.web_key(K.F1)],
 ];
+const TV_COLS = 3;
 let tvSel = 0;
 for (const [name] of TV_ITEMS) { const d = document.createElement('div'); d.textContent = name; tvGrid.appendChild(d); }
 function tvShow() { [...tvGrid.children].forEach((d, i) => d.classList.toggle('on', i === tvSel)); }
 function tvOpen(on) { tvMenu.hidden = !on; if (on) tvShow(); }
+
+// the player's parts (MSX pixels) and the control row's cells (from the mouse's: ui.c)
+const TV_ZONES = { pic: [0, 40, 256, 96], list: [0, 144, 256, 40], ctl: [0, 184, 256, 8] };
+const TV_ORDER = ['pic', 'list', 'ctl'];
+const TV_CTL = [['prev', 1, 1], ['back10', 2, 2], ['play', 3, 3], ['pause', 4, 4], ['stop', 5, 5], ['on10', 6, 6], ['next', 7, 7],
+                ['shuffle', 9, 11], ['repeat', 13, 15], ['eq', 17, 18], ['volume', 20, 31]];
+let tvZone = 'list', tvIn = false, tvCtl = 2, tvVol = false, tvAt = 0;
+function tvClick(col) { X.web_mouse(col * 8 + 3, 23 * 8 + 3, 1); X.web_mouse(col * 8 + 3, 23 * 8 + 3, 7); }
+
+// the frame, drawn over the picture (draw()): for a few seconds after a key, and while a control is chosen
+function tvFrame(g, d) {
+    if (!tvMode || !X || !tvMenu.hidden) return;
+    const st = X.web_tv_state();
+    if ((st & 15) !== 0 || (st & 0x600)) return;                // (another page, the help, the search line)
+    const recent = performance.now() - tvAt < 6000;
+    let r = null, col = '#ffffff';
+    if (tvIn && tvZone === 'ctl') {
+        const [, c0, c1] = TV_CTL[tvCtl];
+        r = [c0 * 8 - 1, 183, (c1 - c0 + 1) * 8 + 2, 9];
+        if (tvVol || (st & 0x100)) col = '#ffff24';
+    } else if (!tvIn && recent) r = TV_ZONES[tvZone];
+    else if (tvIn && tvZone === 'pic' && recent) { r = TV_ZONES.pic; col = '#6dffff'; }
+    if (!r) return;
+    const kx = d.w / 256, ky = d.h / 192, lw = Math.max(2, Math.round(kx * 0.75));
+    g.save();
+    g.strokeStyle = col;
+    g.lineWidth = lw;
+    g.strokeRect(d.x + r[0] * kx + lw / 2, d.y + r[1] * ky + lw / 2, r[2] * kx - lw, r[3] * ky - lw);
+    g.restore();
+}
+
 function tv(action) {
     if (!X) return 'ok';
     ensureCtx();
     hideHint();
-    const cols = 4, n = TV_ITEMS.length;
+    tvAt = performance.now();
+    const n = TV_ITEMS.length;
     if (!tvMenu.hidden) {
         if (action === 'left') tvSel = (tvSel + n - 1) % n;
         else if (action === 'right') tvSel = (tvSel + 1) % n;
-        else if (action === 'up') tvSel = (tvSel + n - cols) % n;
-        else if (action === 'down') tvSel = (tvSel + cols) % n;
+        else if (action === 'up') tvSel = (tvSel + n - TV_COLS) % n;
+        else if (action === 'down') tvSel = (tvSel + TV_COLS) % n;
         else if (action === 'ok') { tvOpen(false); TV_ITEMS[tvSel][1](); return 'ok'; }
         else if (action === 'back' || action === 'menu' || action === 'longok') tvOpen(false);
         tvShow();
         return 'ok';
     }
-    const keys = { up: K.UP, down: K.DOWN, left: K.LEFT, right: K.RIGHT, ok: K.ENTER, playpause: K.PLAY, play: K.PLAY, pause: K.PLAY,
-                   stop: K.STOP, next: K.NEXT, prev: K.PREV, ff: ch('.'), rew: ch(','), info: K.F1 };
     if (action === 'longok' || action === 'menu') { tvOpen(true); return 'ok'; }
-    if (action === 'back') {
-        const lv = X.web_back_level();
-        if (lv === 2) return 'exit';
-        X.web_key(lv === 1 ? K.BS : K.ESC);
+    const media = { playpause: K.PLAY, play: K.PLAY, pause: K.PLAY, stop: K.STOP, next: K.NEXT, prev: K.PREV, ff: ch('.'), rew: ch(','), info: K.F1 };
+    if (media[action] !== undefined) { X.web_key(media[action]); return 'ok'; }
+    const arrows = { up: K.UP, down: K.DOWN, left: K.LEFT, right: K.RIGHT };
+    const st = X.web_tv_state();
+    // another page, the help, the search line: the keys as they are, Back is ESC
+    if ((st & 15) !== 0 || (st & 0x600)) {
+        if (action === 'back') X.web_key(K.ESC);
+        else if (action === 'ok') X.web_key(K.ENTER);
+        else if (arrows[action]) X.web_key(arrows[action]);
         return 'ok';
     }
-    if (keys[action] !== undefined) X.web_key(keys[action]);
+    // the equalizer (from the control row's EQ): its arrows; Back or OK closes it
+    if (st & 0x100) {
+        if (action === 'back' || action === 'ok') X.web_key(ch('G'));
+        else if (arrows[action]) X.web_key(arrows[action]);
+        return 'ok';
+    }
+    if (!tvIn) {
+        const i = TV_ORDER.indexOf(tvZone);
+        if (action === 'up') tvZone = TV_ORDER[Math.max(0, i - 1)];
+        else if (action === 'down') tvZone = TV_ORDER[Math.min(TV_ORDER.length - 1, i + 1)];
+        else if (action === 'ok') tvIn = true;
+        else if (action === 'back') {
+            const lv = X.web_back_level();
+            if (lv === 2) return 'exit';
+            X.web_key(lv === 1 ? K.BS : K.ESC);
+        }
+        return 'ok';
+    }
+    if (action === 'back' && !tvVol && !(tvZone === 'list' && X.web_back_level() === 1)) { tvIn = false; return 'ok'; }
+    if (tvZone === 'pic') {
+        const view = st >> 4 & 3;
+        if (action === 'right') X.web_key(ch('V'));
+        else if (action === 'left') { X.web_key(ch('V')); X.web_key(ch('V')); }
+        else if (action === 'ok') { if (view === 2) X.web_full_cover(); else X.web_key(ch('Z')); }
+        else if (action === 'up' || action === 'down') { tvIn = false; return tv(action); }
+        return 'ok';
+    }
+    if (tvZone === 'list') {
+        if (action === 'back') X.web_key(K.BS);             // (the folder up: at the top Back comes out, above)
+        else if (action === 'ok') X.web_key(K.ENTER);
+        else X.web_key(arrows[action]);
+        return 'ok';
+    }
+    // the control row
+    if (tvVol) {
+        if (action === 'left') X.web_key(ch('-'));
+        else if (action === 'right') X.web_key(ch('+'));
+        else if (action === 'ok' || action === 'back' || action === 'up' || action === 'down') tvVol = false;
+        return 'ok';
+    }
+    if (action === 'left') tvCtl = (tvCtl + TV_CTL.length - 1) % TV_CTL.length;
+    else if (action === 'right') tvCtl = (tvCtl + 1) % TV_CTL.length;
+    else if (action === 'up') { tvIn = false; tvZone = 'list'; }
+    else if (action === 'ok') {
+        const [what, c0] = TV_CTL[tvCtl];
+        if (what === 'volume') tvVol = true;
+        else tvClick(c0);
+    }
     return 'ok';
 }
 let tvHold = null;
@@ -1287,6 +1375,7 @@ window.picoamp = {
     key: k => X.web_key(k),
     tv,                                   // the TV's remote (the Android app): 'up' 'down' 'left' 'right' 'ok' 'longok' 'back' 'menu' 'playpause' ...; 'exit': leave
     get tvMenuOpen() { return !tvMenu.hidden; },
+    get tvFocus() { return { zone: tvZone, inside: tvIn, control: TV_CTL[tvCtl][0], volume: tvVol }; },
     save: () => X.web_save(),
     stopSaving() { saving = false; },     // (the tests: the settings are changed under it)
     hideHint,

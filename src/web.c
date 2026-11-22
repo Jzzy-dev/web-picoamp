@@ -205,6 +205,8 @@ void web_frame(void)
 EXPORT(web_key) void web_key(int k) { if (started) ui_key(k); }
 EXPORT(web_back_level) int web_back_level(void) { return started ? ui_back_level() : 2; }
 EXPORT(web_goto) void web_goto(const char *place) { if (started) ui_goto(place); }
+EXPORT(web_tv_state) int web_tv_state(void) { return started ? ui_tv_state() : 0; }
+EXPORT(web_full_cover) void web_full_cover(void) { if (started) ui_full_cover(); }
 EXPORT(web_mouse) void web_mouse(int x, int y, int b) { if (started) ui_mouse(x, y, b); }
 EXPORT(web_reload) void web_reload(void) { if (started) ui_reload(); }
 EXPORT(web_save) void web_save(void) { if (started) { ui_save_state(); config_save(); } }

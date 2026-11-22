@@ -30,6 +30,6 @@ button.main { background: #24b624; border-color: #6dff6d; color: #000; }
 #tvmenu[hidden] { display: none; }
 #tvmenu h2 { margin: 0 0 .6vw; font-size: 1em; color: #ffff24; letter-spacing: .12em; }
 #tvmenu p { margin: .8vw 0 0; font-size: .6em; color: #b6b6b6; letter-spacing: .05em; }
-#tvgrid { display: grid; grid-template-columns: repeat(4, 19vw); gap: .4vw; }
+#tvgrid { display: grid; grid-template-columns: repeat(3, 22vw); gap: .4vw; }
 #tvgrid div { padding: .35vw .6vw; border: 2px solid #24246d; white-space: nowrap; overflow: hidden; }
 #tvgrid div.on { background: #6dffff; color: #000049; border-color: #ffff24; }

@@ -1329,3 +1329,18 @@ void ui_goto(const char *place)
     ui_page(PG_PLAYER);
     open_place(place, NULL);
 }
+
+// what the TV's remote needs to know: the page (bits 0-3), the view (4-5: spectrum, scope, cover),
+// the equalizer open (8), the help (9), the search line (10)
+int ui_tv_state(void)
+{
+    return page | (cfg.view & 3) << 4 | (eq_open ? 0x100 : 0) | (help_on ? 0x200 : 0) | (searching ? 0x400 : 0);
+}
+
+// the big cover (the full screen page, at its cover)
+void ui_full_cover(void)
+{
+    eq_open = false;
+    ui_page(PG_FULL);
+    fs_cover();
+}

@@ -229,4 +229,7 @@ static void fs_mouse(int x, int y, int b)
     else if (b == MOUSE_RIGHT) ui_page(PG_PLAYER);
 }
 
+// the TV's remote: OK on the cover view opens the big cover at once
+void fs_cover(void) { fs_set(FS_COVER); }
+
 const page_t page_full = { fs_open, fs_frame, fs_key, fs_mouse, fs_close, NULL };
