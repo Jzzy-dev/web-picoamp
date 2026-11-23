@@ -632,8 +632,8 @@ static void mk_mouse(int x, int y, int b)
 
 static void mk_describe(char *out, size_t n)
 {
-    size_t o = (size_t)snprintf(out, n, "markets %s region=%s list='%s' rows=%d state=%d sort=%d sel=%d top=%d",
-                                view == V_CHART ? "chart" : "table", mk_region_names[region], list_name(), n_items, ms_state(), cfg.mk_sort, sel, top);
+    size_t o = (size_t)snprintf(out, n, "markets %s region=%s list='%s' rows=%d state=%d sort=%d sel=%d top=%d sub=%d",
+                                view == V_CHART ? "chart" : "table", mk_region_names[region], list_name(), n_items, ms_state(), cfg.mk_sort, sel, top, sub != NULL);
     if (ms_state() == MS_FAILED) o += (size_t)snprintf(out + o, n - o, " err='%s'", ms_error());
     if (view == V_TABLE)
     {

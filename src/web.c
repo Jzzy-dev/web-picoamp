@@ -16,6 +16,7 @@
 #include "wxsvc.h"
 #include "markets.h"
 #include "cover.h"
+#include "logo.h"
 #include "picture.h"
 
 // ---------------- sys.h ----------------
@@ -207,6 +208,17 @@ EXPORT(web_back_level) int web_back_level(void) { return started ? ui_back_level
 EXPORT(web_goto) void web_goto(const char *place) { if (started) ui_goto(place); }
 EXPORT(web_tv_state) int web_tv_state(void) { return started ? ui_tv_state() : 0; }
 EXPORT(web_full_cover) void web_full_cover(void) { if (started) ui_full_cover(); }
+// what the page shows (as the scripts' "page"): the TV's remote reads its parts from it
+EXPORT(web_describe) const char *web_describe(void)
+{
+    static char b[2048];
+    b[0] = 0;
+    if (!started) return b;
+    char *d = ui_describe(false);
+    u_copy(b, sizeof b, d);
+    free(d);
+    return b;
+}
 EXPORT(web_mouse) void web_mouse(int x, int y, int b) { if (started) ui_mouse(x, y, b); }
 EXPORT(web_reload) void web_reload(void) { if (started) ui_reload(); }
 EXPORT(web_save) void web_save(void) { if (started) { ui_save_state(); config_save(); } }
@@ -261,6 +273,25 @@ bool plat_decode_image(const uint8_t *data, size_t len) { return js_decode_image
 // a picture the page decoded (RGB rows)
 EXPORT(web_cover_rgb) void web_cover_rgb(int w, int h, const uint8_t *rgb) { cover_from_rgb(w, h, rgb, w * 3); }
 // an image the page found in the track's folder (its bytes)
+// the cover's own picture (for the TV: drawn sharp over the MSX's), the default ones' big ones
+EXPORT(web_cover_src) const uint8_t *web_cover_src(int *len)
+{
+    const uint8_t *d;
+    size_t n;
+    *len = 0;
+    if (!cover_source(&d, &n)) return NULL;
+    for (int k = 0; k < DEFAULT_PICTURES; k++)
+        if (n == default_picture_len[k] && !memcmp(d, default_picture[k], n)) { d = default_picture_big[k]; n = default_picture_big_len[k]; break; }
+    *len = (int)n;
+    return d;
+}
+EXPORT(web_cover_gen) unsigned web_cover_gen(void) { return cover_gen(); }
+void audio_ext_volume(bool on);
+void audio_ext_volume_is(int v);
+int audio_own_volume(void);
+EXPORT(web_ext_volume) void web_ext_volume(int on) { audio_ext_volume(on != 0); }
+EXPORT(web_ext_volume_is) void web_ext_volume_is(int v) { audio_ext_volume_is(v); }
+EXPORT(web_own_volume) int web_own_volume(void) { return audio_own_volume(); }
 EXPORT(web_cover_bytes) void web_cover_bytes(const uint8_t *data, int len) { cover_from_bytes(data, (size_t)len); }
 // a station's logo (or len 0: it has none)
 EXPORT(web_logo) void web_logo(const uint8_t *data, int len) { ui_logo(data, (size_t)len); }

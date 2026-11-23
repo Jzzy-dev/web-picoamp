@@ -27,6 +27,7 @@ extern audio_status ui_st;               // the player now
 extern viz_data     ui_viz;
 void ui_page(int pg);                    // open a page (PG_PLAYER: back to the player)
 int  ui_page_now(void);
+bool fs_is_cover(void);                 // it shows the cover
 void fs_cover(void);                     // the full screen page shows the cover (fullscreen.c)
 bool ui_playback_key(int k);             // the keys that work on every page
 void ui_row0(int row, int col, int width, uint8_t colour);   // what plays: a ticker

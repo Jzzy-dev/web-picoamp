@@ -591,12 +591,22 @@ let gen = 0;
 let gainL = 1, gainR = 1;
 let eqGains = [0, 0, 0, 0, 0];
 let lastT = 0;
+// light sound (the TV's remote: Up at the top, Sound): stations as they are, without Web Audio (no
+// spectrum, no equalizer), for a TV too slow for it
+let lightSound = false;
+try { lightSound = localStorage.getItem('picoamp-light') === '1'; } catch (e) { }
+function setLightSound(on) {
+    lightSound = on;
+    try { localStorage.setItem('picoamp-light', on ? '1' : '0'); } catch (e) { }
+    note(on ? 'Light sound: stations without the spectrum and equalizer (from the next one)' : 'Full sound: the spectrum and equalizer (from the next station)');
+}
 
 function ensureCtx() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    ctx = new AC();
+    // (the TV: larger buffers, the sound before the speed of the knobs: a slow TV's CPU otherwise crackles)
+    ctx = new AC(tvMode ? { latencyHint: 'playback' } : undefined);
     const src = ctx.createMediaElementSource(el);
     const pre = ctx.createGain();
     const bands = [['lowshelf', 120], ['peaking', 250], ['peaking', 1000], ['peaking', 4000], ['highshelf', 7200]]
@@ -889,6 +899,13 @@ function js_audio_play(p, n, isFile) {
     let url = src;
     if (location.protocol === 'https:' && /^http:/i.test(url)) cur.insecure = true;
     if (!cur.insecure) npStart(url);
+    if (lightSound) {
+        cur.usingPlain = true;
+        plain.src = url;
+        applyGain();
+        plain.play().catch(e => { if (g === gen && e.name !== 'AbortError') failStream(); });
+        return;
+    }
     el.src = url;
     el.play().catch(e => { if (g === gen && e.name === 'NotAllowedError') cErr(playError(e)); });
 }
@@ -1013,6 +1030,68 @@ function computeDest(cw, ch, scale) {
     dest = { x: Math.floor((cw - dw) / 2), y: Math.floor((ch - dh) / 2), w: Math.max(1, dw), h: Math.max(1, dh) };
 }
 
+// ---------------- the cover, sharp (the TV, the app; hires=1) ----------------
+// the cover's own picture over the MSX's: on the player (the cover view) and full screen
+let hiGen = -1, hiImg = null, hiLen = 0;
+function hiCover(g, d) {
+    if (!(tvMode || dev || params.get('hires') === '1') || params.get('hires') === '0') return;
+    const st = X.web_tv_state();
+    if (!(st & 0x8000)) return;
+    const full = !!(st & 0x4000), player = (st & 15) === 0 && (st >> 4 & 3) === 2 && !(st & 0x700);
+    if (!full && !player) return;
+    const gen = X.web_cover_gen();
+    if (gen !== hiGen) {
+        hiGen = gen;
+        hiImg = null;
+        if (!hiLen) hiLen = X.web_alloc(4);
+        const p = X.web_cover_src(hiLen), n = new Int32Array(mem.buffer, hiLen, 1)[0];
+        if (p && n > 0 && window.createImageBitmap) {
+            const bytes = new Uint8Array(mem.buffer, p, n).slice();
+            createImageBitmap(new Blob([bytes])).then(b => { if (hiGen === gen) hiImg = b; }).catch(() => { });
+        }
+    }
+    if (!hiImg) return;
+    const iw = hiImg.width, ih = hiImg.height;
+    g.save();
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    if (full) {
+        // all of it, as large as the screen takes
+        const k = Math.min(d.w / iw, d.h / ih), w = iw * k, h = ih * k;
+        g.fillStyle = '#000';
+        g.fillRect(d.x, d.y, d.w, d.h);
+        g.drawImage(hiImg, d.x + (d.w - w) / 2, d.y + (d.h - h) / 2, w, h);
+    } else {
+        // the MSX's square (x 8-87, y 48-127 of 256 x 192): the middle of it, as the MSX's
+        const kx = d.w / 256, ky = d.h / 192, m = Math.min(iw, ih);
+        g.drawImage(hiImg, (iw - m) / 2, (ih - m) / 2, m, m, d.x + 8 * kx, d.y + 48 * ky, 80 * kx, 80 * ky);
+    }
+    g.restore();
+}
+
+// ---------------- the device's volume (the Android app) ----------------
+// the sound at full here, the device's (the TV's) volume is the volume: shown, and set from here
+const dev = window.PicoAmpAndroid && window.PicoAmpAndroid.getVolume ? window.PicoAmpAndroid : null;
+let devVol = -1, devFixed = false;
+function systemVolume(v) {
+    if (!X || !dev) return;
+    devVol = devFixed ? 100 : Math.round(v);
+    X.web_ext_volume_is(devVol);
+}
+function deviceVolume() {
+    if (!dev) return;
+    if (devVol < 0) {
+        devFixed = !!dev.volumeFixed();
+        X.web_ext_volume(1);
+        systemVolume(dev.getVolume());
+        return;
+    }
+    const v = X.web_own_volume();
+    if (v === devVol) return;
+    if (devFixed) { dev.volumeStep(v > devVol ? 1 : -1); X.web_ext_volume_is(100); }   // (the TV's own, by HDMI-CEC: up or down)
+    else { devVol = v; dev.setVolume(v); }
+}
+
 function draw() {
     const w = X.web_width(), h = X.web_height();
     if (!img || img.width !== w || img.height !== h) {
@@ -1043,6 +1122,8 @@ function draw() {
     g2.imageSmoothingEnabled = !exact;
     g2.imageSmoothingQuality = 'high';
     g2.drawImage(big, dest.x, dest.y, dest.w, dest.h);
+    hiCover(g2, dest);
+    deviceVolume();
     tvFrame(g2, dest);
 }
 
@@ -1190,16 +1271,23 @@ dlg.addEventListener('close', () => { saveCurrent(); X.web_reload(); save(); can
 
 // ---------------- the TV (the Android app, or ?tv=1): its remote ----------------
 // The remote has the arrows, OK, Back, and sometimes play/pause and the like. On the player, a
-// white frame shows the part of the screen the arrows are in: Up/Down move it between the picture
-// (spectrum, scope, cover), the list and the control row; OK goes into that part:
+// white frame shows the part of the screen the arrows are in: Up/Down move it between the remote's
+// own row (Menu, Help, Sound full/light, Exit), the seek bar, the picture (spectrum, scope, cover),
+// the list and the control row; OK goes into that part:
+//   the seek bar  Left/Right: 10 s back / on (at once; a track, not a station)
 //   the picture   Left/Right: spectrum, scope, cover; OK on the cover: the cover big (full screen)
-//   the list      the arrows and OK as ever; Back: the folder up, at the top out of the list
+//   the list      the arrows and OK as ever; Back: the folder up, at the top out of the list;
+//                 OK held: the station into the favourites (in the favourites: out of them)
 //   the controls  Left/Right choose (previous, 10 s back, play, pause, stop, 10 s on, next, shuffle,
 //                 repeat, EQ, volume), OK does it; on EQ the arrows set the equalizer, on the volume
-//                 Left/Right set it
-// Back comes out again (and at the top leaves the app: 'exit'). OK held (or the menu key) opens the
-// menu: the list's places and the other pages. The app calls picoamp.tv(action); a keyboard here
-// (?tv=1): Enter held is OK held, Escape is Back.
+//                 Left/Right set it (in the app: the TV's own volume)
+// Back comes out again (and at the top leaves the app: 'exit'). OK held elsewhere (or the menu key)
+// opens the menu: the list's places and the other pages. The other pages: a key row chosen word by
+// word (Left/Right, OK) under the clock (Down), the markets (Left held; the chart: Down held twice)
+// and the news (Down held); the markets' table: Right held its members, Up held now, Down held the
+// order; the news' My feeds: OK held on the right a feed in, on the left out. The app calls
+// picoamp.tvKey(phase, key) for the arrows and OK (a key held is its long one) and picoamp.tv(action)
+// for the rest; a keyboard here (?tv=1): the arrows and Enter (held), Escape is Back.
 const tvMode = params.get('tv') === '1';
 const tvMenu = document.getElementById('tvmenu'), tvGrid = document.getElementById('tvgrid');
 const ch = c => c.charCodeAt(0);
@@ -1224,33 +1312,224 @@ function tvShow() { [...tvGrid.children].forEach((d, i) => d.classList.toggle('o
 function tvOpen(on) { tvMenu.hidden = !on; if (on) tvShow(); }
 
 // the player's parts (MSX pixels) and the control row's cells (from the mouse's: ui.c)
-const TV_ZONES = { pic: [0, 40, 256, 96], list: [0, 144, 256, 40], ctl: [0, 184, 256, 8] };
-const TV_ORDER = ['pic', 'list', 'ctl'];
+//   top    the remote's own: Menu, Help, Sound (full / light), Exit   (Left/Right choose, OK)
+//   seek   the seek bar: Left/Right 10 s back / on (a track, not a station)
+//   pic    the picture   list   the list   ctl   the control row
+const PG = { PLAYER: 0, FULL: 1, CLOCK: 2, WX: 3, NEWS: 4, PICS: 5, MARKETS: 6 };
+const TV_ZONES = { top: [0, 0, 256, 16], seek: [4, 31, 248, 10], pic: [0, 40, 256, 96], list: [0, 144, 256, 40], ctl: [0, 184, 256, 8] };
+const TV_ORDER = ['top', 'seek', 'pic', 'list', 'ctl'];
 const TV_CTL = [['prev', 1, 1], ['back10', 2, 2], ['play', 3, 3], ['pause', 4, 4], ['stop', 5, 5], ['on10', 6, 6], ['next', 7, 7],
                 ['shuffle', 9, 11], ['repeat', 13, 15], ['eq', 17, 18], ['volume', 20, 31]];
-let tvZone = 'list', tvIn = false, tvCtl = 2, tvVol = false, tvAt = 0;
+const TV_TOP = ['Menu', 'Help', 'Sound', 'Exit'];
+let tvZone = 'list', tvIn = false, tvCtl = 2, tvVol = false, tvAt = 0, tvTop = 0;
+let tvBar = null;                 // a page's key rows, chosen one by one: { page, items: [[label, act, x, y, w, h]], i }
+let tvHeads = false;              // the markets' chart: its headlines framed
 function tvClick(col) { X.web_mouse(col * 8 + 3, 23 * 8 + 3, 1); X.web_mouse(col * 8 + 3, 23 * 8 + 3, 7); }
+function cstr(p) { if (!p) return ''; const b = new Uint8Array(mem.buffer, p); let n = 0; while (b[n]) n++; return new TextDecoder().decode(b.subarray(0, n)); }
+const describe = () => cstr(X.web_describe());
+const field = (d, k) => { const m = d.match(new RegExp('\\b' + k + '=(-?\\d+)')); return m ? +m[1] : null; };
+const note = t => withStr(t, p => X.web_message(p, 0));
+const keys = s => { for (const c of s) if (c.charCodeAt(0) >= 32 && c.charCodeAt(0) < 127) X.web_key(c.charCodeAt(0)); };
+// a key that types text: the TV's on-screen keyboard (prompt()), then the text and Enter; nothing when cancelled
+const typed = (key, question, then) => () => {
+    const t = prompt(question);
+    if (t === null) return;
+    X.web_key(typeof key === 'number' ? key : ch(key));
+    keys(t.trim());
+    X.web_key(K.ENTER);
+    if (then) then();
+};
+const sendKey = k => () => X.web_key(typeof k === 'number' ? k : ch(k));
 
-// the frame, drawn over the picture (draw()): for a few seconds after a key, and while a control is chosen
+// ---- the pages' key rows (where each key's words are: the frame goes around them)
+// (the 512-pixel pages: 6-pixel letters from x 16; the clock's: from x 0)
+function at6(x0, row, text, label, act) {
+    const i = text.indexOf(label);
+    return [label, act, x0 + 6 * Math.max(0, i), row * 8, 6 * label.length, 8];
+}
+const MK25 = ' 1 Europe  2 Americas  3 Asia-Pacific   C clock  W weather  T news  $/ESC player';
+const MK24 = ' </> list  Up/Down choose  Enter chart  I members (BS back)  O order  U now';
+const NW25 = ' C clock   W weather   T the player   I info';
+const NW24 = {
+    feeds: ' Left/Right side  Enter read/add  D remove  U/J move  A address  BS back  ESC headlines',
+    headlines: ' Enter read  Up/Down choose  Left/Right page  1-9 a feed  F My feeds  S sort',
+    story: ' Up/Down scroll  Left/Right page  Enter full article/summary  N/P next/prev  ESC',
+    info: ' ESC, Enter or BS: back',
+};
+const CK23 = '</> face I time L place O sleep A alarm';
+function barItems(pg, d) {
+    if (pg === PG.MARKETS) {
+        const chart = /markets chart/.test(d);
+        const lr = chart ? [['<', sendKey(K.LEFT), 16 + 6 * 18, 192, 18, 8], ['>', sendKey(K.RIGHT), 16 + 6 * 46, 192, 18, 8]]
+                         : [at6(16, 24, MK24, '<', sendKey(K.LEFT)), at6(16, 24, MK24, '>', sendKey(K.RIGHT))];
+        return [...lr, at6(16, 25, MK25, '1 Europe', sendKey('1')), at6(16, 25, MK25, '2 Americas', sendKey('2')),
+                at6(16, 25, MK25, '3 Asia-Pacific', sendKey('3')), at6(16, 25, MK25, 'C clock', sendKey('C')),
+                at6(16, 25, MK25, 'W weather', sendKey('W')), at6(16, 25, MK25, 'T news', sendKey('T')),
+                at6(16, 25, MK25, '$/ESC player', sendKey('$'))];
+    }
+    if (pg === PG.NEWS) {
+        const view = (d.match(/news (\w+)/) || [])[1] || 'headlines', r = NW24[view] || NW24.headlines;
+        const side = field(d, 'side');
+        let it;
+        if (view === 'feeds') it = [
+            at6(16, 24, r, 'Left', sendKey(K.LEFT)), at6(16, 24, r, 'Right', sendKey(K.RIGHT)),
+            at6(16, 24, r, 'read', () => { if (field(describe(), 'side') === 1) X.web_key(K.LEFT); X.web_key(K.ENTER); }),
+            at6(16, 24, r, 'add', () => { if (field(describe(), 'side') === 0) X.web_key(K.RIGHT); X.web_key(K.ENTER); }),
+            at6(16, 24, r, 'D remove', sendKey('D')), at6(16, 24, r, 'U', sendKey('U')), at6(16, 24, r, 'J', sendKey('J')),
+            at6(16, 24, r, 'A address', typed('A', 'A feed\'s address (RSS or Atom)')),
+            at6(16, 24, r, 'BS back', sendKey(K.BS)), at6(16, 24, r, 'ESC headlines', sendKey(K.ESC))];
+        else if (view === 'headlines') it = [
+            at6(16, 24, r, 'Left', sendKey(K.LEFT)), at6(16, 24, r, 'Right', sendKey(K.RIGHT)),
+            at6(16, 24, r, 'Enter read', sendKey(K.ENTER)), at6(16, 24, r, 'F My feeds', sendKey('F')),
+            at6(16, 24, r, 'S sort', sendKey('S'))];
+        else if (view === 'story') it = [
+            at6(16, 24, r, 'Left', sendKey(K.LEFT)), at6(16, 24, r, 'Right', sendKey(K.RIGHT)),
+            at6(16, 24, r, 'Enter full', sendKey(K.ENTER)), at6(16, 24, r, 'N', sendKey('N')), at6(16, 24, r, 'P', sendKey('P')),
+            at6(16, 24, r, 'ESC', sendKey(K.ESC))];
+        else it = [at6(16, 24, r, 'ESC', sendKey(K.ESC))];
+        void side;
+        return [...it, at6(16, 25, NW25, 'C clock', sendKey('C')), at6(16, 25, NW25, 'W weather', sendKey('W')),
+                at6(16, 25, NW25, 'T the player', sendKey('T')), at6(16, 25, NW25, 'I info', sendKey('I'))];
+    }
+    if (pg === PG.CLOCK) return [
+        at6(0, 23, CK23, '<', sendKey(K.LEFT)), at6(0, 23, CK23, '>', sendKey(K.RIGHT)), at6(0, 23, CK23, 'I time', sendKey('I')),
+        at6(0, 23, CK23, 'L place', typed('L', 'The place (empty: found by the internet address)', () => { tvBar = null; })),
+        at6(0, 23, CK23, 'O sleep', sendKey('O')),
+        at6(0, 23, CK23, 'A alarm', typed('A', 'The alarm at (e.g. 7:30; w 7:30: Mo-Fr; empty: off)'))];
+    return null;
+}
+function openBar(pg, d, at) {
+    const items = barItems(pg, d);
+    if (items) tvBar = { page: pg, items, i: Math.min(at || 0, items.length - 1) };
+}
+
+// ---- the frame: drawn over the picture (draw()), for a few seconds after a key, and while a part is chosen
 function tvFrame(g, d) {
     if (!tvMode || !X || !tvMenu.hidden) return;
-    const st = X.web_tv_state();
-    if ((st & 15) !== 0 || (st & 0x600)) return;                // (another page, the help, the search line)
+    const st = X.web_tv_state(), pg = st & 15;
+    const W = X.web_width(), H = X.web_height(), kx = d.w / W, ky = d.h / H, lw = Math.max(2, Math.round(kx * 0.75));
+    const box = (r, col) => {
+        g.save();
+        g.strokeStyle = col;
+        g.lineWidth = lw;
+        g.strokeRect(d.x + r[0] * kx - lw / 2, d.y + r[1] * ky - lw / 2, r[2] * kx + lw, r[3] * ky + lw);
+        g.restore();
+    };
+    if (tvBar && tvBar.page === pg) { const it = tvBar.items[tvBar.i]; box(it.slice(2), '#ffffff'); return; }
+    if (tvHeads && pg === PG.MARKETS) { box([16, 160, 480, 32], '#ffffff'); return; }
+    if (pg !== PG.PLAYER || (st & 0x600)) return;
     const recent = performance.now() - tvAt < 6000;
-    let r = null, col = '#ffffff';
+    if (tvZone === 'top') {
+        // the remote's own row, over the player's top
+        const h = 14 * ky, y = d.y + 1 * ky, w = d.w / TV_TOP.length;
+        g.save();
+        g.fillStyle = 'rgba(0,0,40,0.92)';
+        g.fillRect(d.x, d.y, d.w, 16 * ky);
+        g.font = `${Math.round(8 * ky)}px sans-serif`;
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        const names = TV_TOP.map(n => n === 'Sound' ? (lightSound ? 'Sound: light' : 'Sound: full') : n);
+        names.forEach((n, i) => {
+            g.fillStyle = i === tvTop ? '#ffff24' : '#ffffff';
+            g.fillText(n, d.x + w * (i + 0.5), y + h / 2);
+        });
+        g.strokeStyle = '#ffffff';
+        g.lineWidth = lw;
+        g.strokeRect(d.x + w * tvTop + 4 * kx, y, w - 8 * kx, h);
+        g.restore();
+        return;
+    }
     if (tvIn && tvZone === 'ctl') {
         const [, c0, c1] = TV_CTL[tvCtl];
-        r = [c0 * 8 - 1, 183, (c1 - c0 + 1) * 8 + 2, 9];
-        if (tvVol || (st & 0x100)) col = '#ffff24';
-    } else if (!tvIn && recent) r = TV_ZONES[tvZone];
-    else if (tvIn && tvZone === 'pic' && recent) { r = TV_ZONES.pic; col = '#6dffff'; }
-    if (!r) return;
-    const kx = d.w / 256, ky = d.h / 192, lw = Math.max(2, Math.round(kx * 0.75));
-    g.save();
-    g.strokeStyle = col;
-    g.lineWidth = lw;
-    g.strokeRect(d.x + r[0] * kx + lw / 2, d.y + r[1] * ky + lw / 2, r[2] * kx - lw, r[3] * ky - lw);
-    g.restore();
+        box([c0 * 8, 184, (c1 - c0 + 1) * 8, 8], tvVol || (st & 0x100) ? '#ffff24' : '#ffffff');
+    } else if (!tvIn && recent) box(TV_ZONES[tvZone], '#ffffff');
+    else if (tvIn && (tvZone === 'pic' || tvZone === 'seek') && recent) box(TV_ZONES[tvZone], '#6dffff');
+}
+
+// ---- a page's keys (not the player): the key rows, the long presses
+function tvPage(action, st) {
+    const pg = st & 15;
+    const arrows = { up: K.UP, down: K.DOWN, left: K.LEFT, right: K.RIGHT };
+    if (tvBar && tvBar.page !== pg) tvBar = null;
+    if (pg !== PG.MARKETS) tvHeads = false;
+    if (tvBar) {
+        const n = tvBar.items.length;
+        if (action === 'left') tvBar.i = (tvBar.i + n - 1) % n;
+        else if (action === 'right') tvBar.i = (tvBar.i + 1) % n;
+        else if (action === 'ok') {
+            const keep = tvBar, i = tvBar.i;
+            tvBar.items[i][1]();
+            // (the key row stays, its words may have changed: the same place again)
+            const s2 = X.web_tv_state();
+            if (tvBar === keep && (s2 & 15) === pg && !(s2 & 0x600)) openBar(pg, describe(), i);
+            else if ((s2 & 15) !== pg) tvBar = null;
+        }
+        else if (action === 'up' || action === 'back') tvBar = null;
+        return 'ok';
+    }
+    if (tvHeads) {
+        if (action === 'ok') { tvHeads = false; X.web_key(ch('T')); }
+        else if (action === 'down') { tvHeads = false; openBar(pg, describe()); }
+        else if (action === 'up' || action === 'back') tvHeads = false;
+        return 'ok';
+    }
+    const d = (st & 0x600) ? '' : describe();
+    if (pg === PG.MARKETS && d) {
+        const chart = /markets chart/.test(d);
+        if (!chart && action === 'longright') { X.web_key(ch('I')); return 'ok'; }
+        if (!chart && action === 'longup') { X.web_key(ch('U')); return 'ok'; }
+        if (!chart && action === 'longdown') { X.web_key(ch('O')); return 'ok'; }
+        if (!chart && action === 'longleft') { openBar(pg, d); return 'ok'; }
+        if (chart && action === 'longdown') { tvHeads = true; return 'ok'; }
+    }
+    if (pg === PG.NEWS && d && field(d, 'typing') !== 1) {
+        if (action === 'longdown') { openBar(pg, d); return 'ok'; }
+        if (action === 'longok' && /news feeds/.test(d)) {
+            if (field(d, 'side') === 0) X.web_key(ch('D'));                       // My feeds: out
+            else if (field(d, 'topic') >= 0) X.web_key(K.ENTER);                 // a topic's feed: in
+            else note(' Choose a topic first (OK), then hold OK on a feed');
+            return 'ok';
+        }
+    }
+    if (pg === PG.CLOCK && d && action === 'down' && field(d, 'input') === 0 && field(d, 'choosing') === 0) { openBar(pg, d); return 'ok'; }
+    if (action === 'longok') { tvOpen(true); return 'ok'; }
+    if (action.startsWith('long')) action = action.slice(4);
+    if (action === 'back') X.web_key(K.ESC);
+    else if (action === 'ok') X.web_key(K.ENTER);
+    else if (arrows[action]) X.web_key(arrows[action]);
+    return 'ok';
+}
+
+// does a key held mean something else here? (then it acts when let go, or held: its long one)
+function tvWantsLong(name) {
+    if (name === 'ok') return true;
+    if (!X || !tvMenu.hidden || tvBar || tvHeads) return false;
+    const st = X.web_tv_state(), pg = st & 15;
+    if (st & 0x600) return false;
+    if (pg === PG.MARKETS) return /markets table/.test(describe()) ? true : name === 'down';
+    if (pg === PG.NEWS) return name === 'down' && field(describe(), 'typing') !== 1;
+    return false;
+}
+let tvHeld = null;
+// the remote's keys as they go: phase 'down' (pressed), 'repeat' (held, again), 'up' (let go)
+function tvKey(phase, name) {
+    if (!X) return 'ok';
+    if (phase === 'down') {
+        if (tvHeld && tvHeld.timer) clearTimeout(tvHeld.timer);
+        if (tvWantsLong(name)) {
+            const h = tvHeld = { name, later: true };
+            h.timer = setTimeout(() => { h.fired = true; const r = tv('long' + name); if (r === 'exit') window.PicoAmpAndroid?.exit?.(); }, 600);
+            return 'ok';
+        }
+        tvHeld = { name };
+        return tv(name);
+    }
+    if (phase === 'repeat') return tvHeld && tvHeld.name === name && !tvHeld.later ? tv(name) : 'ok';
+    const h = tvHeld;
+    if (!h || h.name !== name) return 'ok';
+    tvHeld = null;
+    if (h.later && !h.fired) { clearTimeout(h.timer); return tv(name); }
+    return 'ok';
 }
 
 function tv(action) {
@@ -1269,29 +1548,53 @@ function tv(action) {
         tvShow();
         return 'ok';
     }
-    if (action === 'longok' || action === 'menu') { tvOpen(true); return 'ok'; }
+    if (action === 'menu') { tvOpen(true); return 'ok'; }
     const media = { playpause: K.PLAY, play: K.PLAY, pause: K.PLAY, stop: K.STOP, next: K.NEXT, prev: K.PREV, ff: ch('.'), rew: ch(','), info: K.F1 };
     if (media[action] !== undefined) { X.web_key(media[action]); return 'ok'; }
     const arrows = { up: K.UP, down: K.DOWN, left: K.LEFT, right: K.RIGHT };
     const st = X.web_tv_state();
-    // another page, the help, the search line: the keys as they are, Back is ESC
-    if ((st & 15) !== 0 || (st & 0x600)) {
-        if (action === 'back') X.web_key(K.ESC);
-        else if (action === 'ok') X.web_key(K.ENTER);
-        else if (arrows[action]) X.web_key(arrows[action]);
-        return 'ok';
-    }
+    // another page, the help, the search line
+    if ((st & 15) !== 0 || (st & 0x600)) return tvPage(action, st);
+    tvBar = null;
+    tvHeads = false;
     // the equalizer (from the control row's EQ): its arrows; Back or OK closes it
     if (st & 0x100) {
-        if (action === 'back' || action === 'ok') X.web_key(ch('G'));
-        else if (arrows[action]) X.web_key(arrows[action]);
+        if (action === 'back' || action === 'ok' || action === 'longok') X.web_key(ch('G'));
+        else if (arrows[action.replace(/^long/, '')]) X.web_key(arrows[action.replace(/^long/, '')]);
+        return 'ok';
+    }
+    // OK held in the list: a station in (or, in the favourites, out of) the favourites
+    if (action === 'longok') {
+        if (tvZone === 'list' && (st & 0x2000)) X.web_key(ch((st & 0x800) ? 'D' : 'F'));
+        else tvOpen(true);
+        return 'ok';
+    }
+    if (action.startsWith('long')) action = action.slice(4);
+    // the remote's own row
+    if (tvZone === 'top') {
+        if (action === 'left') tvTop = (tvTop + TV_TOP.length - 1) % TV_TOP.length;
+        else if (action === 'right') tvTop = (tvTop + 1) % TV_TOP.length;
+        else if (action === 'down' || action === 'back') { tvZone = 'seek'; tvIn = false; }
+        else if (action === 'ok') {
+            const what = TV_TOP[tvTop];
+            if (what === 'Menu') { tvZone = 'list'; tvOpen(true); }
+            else if (what === 'Help') { tvZone = 'list'; X.web_key(K.F1); }
+            else if (what === 'Sound') setLightSound(!lightSound);
+            else if (what === 'Exit') return 'exit';
+        }
+        return 'ok';
+    }
+    // the seek bar: Left/Right wind at once (OK not needed)
+    if (tvZone === 'seek' && (action === 'left' || action === 'right')) {
+        if (st & 0x1000) X.web_key(ch(action === 'left' ? ',' : '.'));
+        else note('A station cannot be wound: no seeking here');
         return 'ok';
     }
     if (!tvIn) {
         const i = TV_ORDER.indexOf(tvZone);
         if (action === 'up') tvZone = TV_ORDER[Math.max(0, i - 1)];
         else if (action === 'down') tvZone = TV_ORDER[Math.min(TV_ORDER.length - 1, i + 1)];
-        else if (action === 'ok') tvIn = true;
+        else if (action === 'ok') tvIn = tvZone !== 'seek';
         else if (action === 'back') {
             const lv = X.web_back_level();
             if (lv === 2) return 'exit';
@@ -1316,7 +1619,9 @@ function tv(action) {
     }
     // the control row
     if (tvVol) {
-        if (action === 'left') X.web_key(ch('-'));
+        // (a TV whose volume is its own, by HDMI-CEC: up or down there)
+        if (dev && devFixed && (action === 'left' || action === 'right') && !(st & 0x10000)) dev.volumeStep(action === 'left' ? -1 : 1);
+        else if (action === 'left') X.web_key(ch('-'));
         else if (action === 'right') X.web_key(ch('+'));
         else if (action === 'ok' || action === 'back' || action === 'up' || action === 'down') tvVol = false;
         return 'ok';
@@ -1331,18 +1636,20 @@ function tv(action) {
     }
     return 'ok';
 }
-let tvHold = null;
 if (tvMode) {
-    // a keyboard (the tests, a TV with one): the arrows, Enter (held: the menu), Escape and Backspace as the remote's
+    // a keyboard (the tests, a TV with one): the arrows and Enter as the remote's (held: their long ones),
+    // Escape as Back
+    const remote = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok' };
     window.addEventListener('keydown', e => {
-        const a = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Escape: 'back', ContextMenu: 'menu' }[e.key];
-        if (e.key === 'Enter') {
+        const r = remote[e.key];
+        const a = { Escape: 'back', ContextMenu: 'menu' }[e.key];
+        if (r) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            if (!e.repeat && !tvHold) tvHold = setTimeout(() => { tvHold = 'long'; tv('longok'); }, 600);
+            if (tvKey(e.repeat ? 'repeat' : 'down', r) === 'exit') window.PicoAmpAndroid?.exit?.();
             return;
         }
-        if (!tvMenu.hidden || a === 'back' || a === 'menu') {
+        if (!tvMenu.hidden || a) {
             if (!a && tvMenu.hidden) return;
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -1350,16 +1657,17 @@ if (tvMode) {
         }
     }, true);
     window.addEventListener('keyup', e => {
-        if (e.key !== 'Enter') return;
+        const r = remote[e.key];
+        if (!r) return;
         e.preventDefault();
-        if (tvHold && tvHold !== 'long') { clearTimeout(tvHold); tv('ok'); }
-        tvHold = null;
+        e.stopImmediatePropagation();
+        if (tvKey('up', r) === 'exit') window.PicoAmpAndroid?.exit?.();
     }, true);
 }
 
 // ---------------- the hint (sound needs a key or a click first) ----------------
 const hint = document.getElementById('hint');
-if (tvMode && hint) hint.textContent = 'Hold OK for the menu \u00b7 Back goes back';
+if (tvMode && hint) hint.textContent = 'Up/Down: the parts \u00b7 OK: in \u00b7 Back: out \u00b7 Up at the top: Menu, Help, Exit';
 function hideHint() { if (hint) hint.hidden = true; }
 setTimeout(hideHint, 10000);
 
@@ -1373,9 +1681,12 @@ window.picoamp = {
     },
     fs: { get: fsGet, set: fsSet, list: fsList },
     key: k => X.web_key(k),
+    tvKey,                                // the remote's keys as they go (the Android app): tvKey('down'|'repeat'|'up', 'up'|'down'|'left'|'right'|'ok')
+    systemVolume,                         // the app: the device's volume changed (0-100)
     tv,                                   // the TV's remote (the Android app): 'up' 'down' 'left' 'right' 'ok' 'longok' 'back' 'menu' 'playpause' ...; 'exit': leave
     get tvMenuOpen() { return !tvMenu.hidden; },
-    get tvFocus() { return { zone: tvZone, inside: tvIn, control: TV_CTL[tvCtl][0], volume: tvVol }; },
+    get tvFocus() { return { zone: tvZone, inside: tvIn, control: TV_CTL[tvCtl][0], volume: tvVol, top: TV_TOP[tvTop], bar: tvBar && tvBar.items[tvBar.i][0], heads: tvHeads }; },
+    get lightSound() { return lightSound; },
     save: () => X.web_save(),
     stopSaving() { saving = false; },     // (the tests: the settings are changed under it)
     hideHint,

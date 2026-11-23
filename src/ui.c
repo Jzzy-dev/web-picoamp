@@ -1334,7 +1334,10 @@ void ui_goto(const char *place)
 // the equalizer open (8), the help (9), the search line (10)
 int ui_tv_state(void)
 {
-    return page | (cfg.view & 3) << 4 | (eq_open ? 0x100 : 0) | (help_on ? 0x200 : 0) | (searching ? 0x400 : 0);
+    return page | (cfg.view & 3) << 4 | (eq_open ? 0x100 : 0) | (help_on ? 0x200 : 0) | (searching ? 0x400 : 0)
+         | (lib_is_favourites(list.place) ? 0x800 : 0) | (st.seekable ? 0x1000 : 0)
+         | (list.count && sel < list.count && list.e[sel].type == E_STATION ? 0x2000 : 0)
+         | (page == PG_FULL && fs_is_cover() ? 0x4000 : 0) | (cover_state() == COVER_READY ? 0x8000 : 0) | (st.system ? 0x10000 : 0);
 }
 
 // the big cover (the full screen page, at its cover)

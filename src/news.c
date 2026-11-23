@@ -636,7 +636,7 @@ static void nw_describe(char *out, size_t n)
     int k;
     nf_item *it = nf_items(&k);
     static const char *const vn[] = { "headlines", "story", "feeds", "info" };
-    size_t o = (size_t)snprintf(out, n, "news %s feed='%s' state=%d stories=%d err='%s'", vn[view], feed_name, nf_state(), k, nf_error());
+    size_t o = (size_t)snprintf(out, n, "news %s feed='%s' state=%d stories=%d err='%s' side=%d typing=%d topic=%d", vn[view], feed_name, nf_state(), k, nf_error(), f_side, typing, c_topic);
     if (view == V_LIST)
         for (int i = 0; i < k && i < 5 && o < n; i++)
         {

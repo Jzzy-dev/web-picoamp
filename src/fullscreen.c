@@ -181,6 +181,8 @@ static void draw_cover_big(void)
     gfx_s8_on = true;
 }
 
+bool fs_is_cover(void) { return fs_mode == FS_COVER; }
+
 static void fs_set(int m)
 {
     fs_mode = (m + FS_N) % FS_N;

@@ -14,6 +14,7 @@
 #include "viz.h"
 #include "cover.h"
 #include "sonos.h"
+#include "config.h"
 
 static audio_status st;
 static char **pl;                   // files, or "url\x1Fname" for stations
@@ -148,9 +149,13 @@ static void sys_poll(void)
     pretend_bars();
 }
 
+// the volume outside (the TV's own, the Android app): the sound at full, the volume only shown and passed on
+static bool ext_volume;
+
 static void apply_gain(void)
 {
-    double g = (muted || volume <= 0) ? 0 : pow(10.0, -(100 - volume) / 40.0) * fade / 1000.0;
+    int v = ext_volume ? 100 : volume;
+    double g = (muted || v <= 0) ? 0 : pow(10.0, -(100 - v) / 40.0) * fade / 1000.0;
     double l = balance <= 50 ? g : g * (100 - balance) / 50.0;
     double r = balance >= 50 ? g : g * balance / 50.0;
     js_audio_gain(l, r);
@@ -339,6 +344,16 @@ void audio_set_volume(int v)
     v = v < 0 ? 0 : v > 100 ? 100 : v;
     if (following && sys_now.volume >= 0) { sonos_volume(v, st.muted); st.volume = v; changed(); return; }
     volume = v; st.volume = volume; apply_gain(); changed();
+}
+void audio_ext_volume(bool on) { ext_volume = on; apply_gain(); }
+int audio_own_volume(void) { return volume; }
+// the volume outside changed (the TV's buttons): shown, not passed back
+void audio_ext_volume_is(int v)
+{
+    v = v < 0 ? 0 : v > 100 ? 100 : v;
+    volume = v;
+    cfg.volume = v;                     // (the player's + and - go on from it)
+    if (!(following && sys_now.volume >= 0)) { st.volume = v; changed(); }
 }
 void audio_set_mute(bool m)
 {
