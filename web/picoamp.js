@@ -278,15 +278,138 @@ function js_music_list(id, p, n) {
 function js_music_name(out, max) { return music ? writeOut(music.name, out, max) : 0; }
 
 // ---------------- the pictures' folder (I), picked apart from the music's ----------------
-let pics = null;               // { name, handle } or { name, tree }
+let pics = null;               // { name, handle }, { name, tree } or { name, net: { base, q } } (from the network)
 let picsPick = null;
 async function restorePics() {
+    try {
+        const n = JSON.parse(localStorage.getItem('picoamp-pics-net') || 'null');
+        if (n && n.net) { pics = n; return; }
+    } catch { }
     try {
         const h = await idbGet('pictures');
         if (h && h.kind === 'directory') pics = { name: h.name, handle: h };
     } catch { }
 }
+// ---- pictures from the network: a Windows or NAS share, a media server (the Android app does those
+// two: /net/ there) and PicoAmp for Windows (its MSX link's port: /pics/)
+const hasNet = () => !!(window.PicoAmpAndroid && window.PicoAmpAndroid.getVolume) || params.get('netpics') === '1';
+function netSources() { try { return JSON.parse(localStorage.getItem('picoamp-pics-sources') || '[]'); } catch { return []; } }
+function setNetSources(a) { try { localStorage.setItem('picoamp-pics-sources', JSON.stringify(a.slice(0, 12))); } catch { } }
+function netOf(src) {
+    if (src.kind === 'win') return { base: `http://${src.host}/pics/`, q: '' };
+    return { base: (params.get('netbase') || '/net/'), q: 'src=' + encodeURIComponent(src.src) + '&' };
+}
+async function netFetch(net, what, path) {
+    const r = await fetch(`${net.base}${what}?${net.q}path=${encodeURIComponent(path)}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error((await r.text().catch(() => '')).trim().slice(0, 80) || `The network folder said ${r.status}`);
+    return r;
+}
+function useNet(src) {
+    pics = { name: src.label, net: netOf(src) };
+    try { localStorage.setItem('picoamp-pics-net', JSON.stringify(pics)); } catch { }
+    setNetSources([src, ...netSources().filter(o => o.label !== src.label)]);
+    return true;
+}
+function smbSource() {
+    const where = prompt('The share: \\\\PC\\Pictures or \\\\NAS\\photo\\Holidays (a folder in it too)');
+    if (!where || !where.trim()) return null;
+    const parts = where.trim().replace(/^smb:\/\//i, '').replace(/\//g, '\\').replace(/^\\+/, '').split('\\').filter(Boolean);
+    if (parts.length < 2) { alert('A share is \\\\PC\\share: the PC (or NAS) and the share'); return null; }
+    const user = prompt('The user name (DOMAIN\\user; empty: as a guest)', '') ?? '';
+    const pass = user ? (prompt('The password', '') ?? '') : '';
+    const cred = user ? encodeURIComponent(user) + (pass ? ':' + encodeURIComponent(pass) : '') + '@' : '';
+    return { kind: 'smb', label: '\\\\' + parts.join('\\'), src: `smb://${cred}${parts[0]}/${parts.slice(1).map(encodeURIComponent).join('/')}` };
+}
+function winSource() {
+    let h = prompt('The PC with PicoAmp for Windows: its address (and the MSX link\'s port, 8765 if not said), e.g. 192.168.1.20', '');
+    if (!h || !h.trim()) return null;
+    h = h.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    if (!/:\d+$/.test(h)) h += ':8765';
+    return { kind: 'win', label: 'PicoAmp for Windows on ' + h, host: h };
+}
+// the choice: a list over the page (the remote's arrows and OK, or clicks); resolves true when chosen
+let netPick = null;               // { el, items: [[label, act, saved]], i, done }
+function netPickShow() {
+    if (!netPick) return;
+    const list = netPick.el.querySelector('.items');
+    list.replaceChildren(...netPick.items.map(([label], i) => {
+        const d = document.createElement('div');
+        d.textContent = label;
+        if (i === netPick.i) d.className = 'on';
+        d.onclick = () => { netPick.i = i; netPickAct('ok'); };
+        return d;
+    }));
+    list.children[netPick.i]?.scrollIntoView({ block: 'nearest' });
+}
+function netPickClose(ok) {
+    if (!netPick) return;
+    const p = netPick;
+    netPick = null;
+    p.el.remove();
+    p.done(ok);
+}
+function netPickAct(a) {
+    const p = netPick, n = p.items.length;
+    if (a === 'up' || a === 'left') p.i = (p.i + n - 1) % n;
+    else if (a === 'down' || a === 'right') p.i = (p.i + 1) % n;
+    else if (a === 'back' || a === 'menu') { netPickClose(false); return; }
+    else if (a === 'ok') {
+        const r = p.items[p.i][1]();
+        if (r && r.then) r.then(ok => { if (ok) netPickClose(true); });
+        else if (r) netPickClose(true);
+        return;
+    }
+    else if (a === 'longok' && p.items[p.i][2]) {
+        // a remembered one: forgotten
+        const lab = p.items[p.i][0].replace(/^\u2605 /, '');
+        setNetSources(netSources().filter(o => o.label !== lab));
+        p.items.splice(p.i, 1);
+        p.i = Math.min(p.i, p.items.length - 1);
+    }
+    netPickShow();
+}
+function netPickOpen() {
+    return new Promise(done => {
+        const el = document.createElement('div');
+        el.id = 'netpick';
+        el.setAttribute('role', 'menu');
+        el.innerHTML = '<h2>Pictures from</h2><div class="items"></div><p>OK: choose &middot; OK held: forget a remembered one &middot; Back: close</p>';
+        document.body.append(el);
+        const local = () => {
+            // (the folder picker's answer is the choice's)
+            const p = netPick;
+            netPick = null;
+            p.el.remove();
+            const forgetNet = () => { try { localStorage.removeItem('picoamp-pics-net'); } catch { } };
+            (window.showDirectoryPicker
+                ? window.showDirectoryPicker({ id: 'picoamp-pictures', mode: 'read', startIn: 'pictures' })
+                    .then(async h => { pics = { name: h.name, handle: h }; forgetNet(); await idbSet('pictures', h).catch(() => { }); return true; })
+                    .catch(() => false)
+                : pickWithInput('Pictures').then(root => { if (root) { pics = root; forgetNet(); } return !!root; })).then(done);
+            return false;
+        };
+        const items = [];
+        for (const s of netSources()) if (s.kind !== 'smb' || hasNet()) items.push(['\u2605 ' + s.label, () => useNet(s), true]);
+        const at = items.length;
+        if (hasNet()) items.push(['A Windows or NAS share\u2026', () => { const s = smbSource(); return s ? useNet(s) : false; }]);
+        items.push(['PicoAmp for Windows (its pictures)\u2026', () => { const s = winSource(); return s ? useNet(s) : false; }]);
+        if (!tvMode) items.push(['A folder on this device\u2026', local]);
+        if (hasNet()) items.push(['(looking for media servers\u2026)', () => false]);
+        netPick = { el, items, i: 0, done };
+        netPickShow();
+        if (hasNet()) fetch(`${params.get('netbase') || '/net/'}servers`).then(r => r.json()).catch(() => []).then(list => {
+            if (!netPick || netPick.el !== el) return;
+            const k = items.findIndex(it => it[0].startsWith('(looking'));
+            const found = (list || []).filter(sv => !netSources().some(o => o.src === sv.src))
+                .map(sv => ['Media server: ' + sv.name, () => useNet({ kind: 'dlna', label: 'Media server ' + sv.name, src: sv.src })]);
+            items.splice(k, 1, ...(found.length ? found : [['(no media servers found)', () => false]]));
+            items.splice(at, 0, ...items.splice(items.length - (found.length || 1)));     // (the servers after the remembered ones)
+            netPickShow();
+        });
+    });
+}
 function js_pics_pick() {
+    if (tvMode || hasNet()) { picsPick = netPickOpen(); return; }
     if (window.showDirectoryPicker) {
         picsPick = window.showDirectoryPicker({ id: 'picoamp-pictures', mode: 'read', startIn: 'pictures' })
             .then(async h => { pics = { name: h.name, handle: h }; await idbSet('pictures', h).catch(() => { }); return true; })
@@ -298,7 +421,8 @@ function js_pics_list(id, p, n) {
     const pick = picsPick;
     (async () => {
         if (pick) { const ok = await pick; if (picsPick === pick) picsPick = null; if (!ok && !pics) throw new Error('No folder chosen'); }
-        const items = await (await rootDir(pics, path, 'pictures')).list();
+        const items = pics && pics.net ? (await (await netFetch(pics.net, 'list', path)).text()).split('\n').filter(l => /^[df] ./.test(l)).map(l => [l[0], l.slice(2)])
+                                       : await (await rootDir(pics, path, 'pictures')).list();
         return items.filter(([, nm]) => !nm.startsWith('.')).map(([k, nm]) => `${k} ${nm}`).join('\n');
     })().then(text => withStr(text, p2 => X.dir_done(id, p2, 1)),
               e => withStr(String(e.message || e), p2 => X.dir_done(id, p2, 0)));
@@ -308,6 +432,7 @@ async function picsFile(path) {
     const parts = path.split('/');
     const name = parts.pop();
     if (!pics) throw new Error('No pictures folder');
+    if (pics.net) return (await netFetch(pics.net, 'file', path)).blob();
     if (pics.tree) {
         let d = pics.tree;
         for (const p of parts) d = d && d.children.get(p);
@@ -1503,6 +1628,7 @@ function tvPage(action, st) {
 // does a key held mean something else here? (then it acts when let go, or held: its long one)
 function tvWantsLong(name) {
     if (name === 'ok') return true;
+    if (netPick) return false;
     if (!X || !tvMenu.hidden || tvBar || tvHeads) return false;
     const st = X.web_tv_state(), pg = st & 15;
     if (st & 0x600) return false;
@@ -1537,6 +1663,7 @@ function tv(action) {
     ensureCtx();
     hideHint();
     tvAt = performance.now();
+    if (netPick) { netPickAct(action.replace(/^long(?!ok)/, '')); return 'ok'; }
     const n = TV_ITEMS.length;
     if (!tvMenu.hidden) {
         if (action === 'left') tvSel = (tvSel + n - 1) % n;

@@ -50,6 +50,33 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
 http.server.ThreadingHTTPServer.allow_reuse_address = True
 page_srv = http.server.ThreadingHTTPServer(('127.0.0.1', PAGE_PORT), functools.partial(Quiet, directory=os.path.join(ROOT, 'web')))
 threading.Thread(target=page_srv.serve_forever, daemon=True).start()
+# pictures from the network: the app's /net/ (a share, a media server) and PicoAmp for Windows' /pics/, both from P
+import json, urllib.parse
+NET_PORT = 8772
+net_log = []
+class NetFake(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path)
+        q = urllib.parse.parse_qs(u.query)
+        net_log.append(urllib.parse.unquote(self.path))
+        rel = q.get('path', [''])[0].strip('/')
+        full = os.path.join(P, *rel.split('/')) if rel else P
+        code, typ, body = 200, 'text/plain; charset=utf-8', b''
+        if u.path == '/net/servers': typ, body = 'application/json', json.dumps([{'src': 'dlna:http://10.0.0.9:9000/desc.xml', 'name': 'Fake NAS'}]).encode()
+        elif u.path in ('/net/list', '/pics/list') and os.path.isdir(full):
+            body = ''.join('%s %s\n' % ('d' if os.path.isdir(os.path.join(full, n)) else 'f', n) for n in sorted(os.listdir(full))
+                           if os.path.isdir(os.path.join(full, n)) or n.lower().endswith(('.jpg', '.png'))).encode()
+        elif u.path in ('/net/file', '/pics/file') and os.path.isfile(full): typ, body = 'image/jpeg', open(full, 'rb').read()
+        else: code, body = 404, b'not here'
+        self.send_response(code)
+        self.send_header('Content-Type', typ)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(body)
+net_srv = http.server.ThreadingHTTPServer(('127.0.0.1', NET_PORT), NetFake)
+threading.Thread(target=net_srv.serve_forever, daemon=True).start()
 log = open(os.path.join(T, 'svc.log'), 'w')
 svc = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tests', 'web_server.py'), str(SVC_PORT), os.path.join(M, '01 Sine.mp3'), M], stdout=log, stderr=log)
 time.sleep(0.6)
@@ -322,8 +349,13 @@ try:
       # the pictures (I): a folder picked, its folders and pictures, one in SCREEN 8, the next (a PNG), the slideshow
       out = run('key Esc; key I; wait 100; page')
       check('pictures: no folder yet', out, r"pictures browse folder='' entries=1 folders=1 pictures=0")
-      with page.expect_file_chooser() as fc:
-          page.keyboard.press('Enter')
+      for attempt in range(3):          # (the chooser sometimes misses the first Enter: again)
+          try:
+              with page.expect_file_chooser(timeout=6000) as fc:
+                  page.keyboard.press('Enter')
+              break
+          except Exception:
+              print('     (no file chooser yet: %s)' % run('page').split('\n')[-1][:90], flush=True)
       fc.value.set_files(P)
       time.sleep(0.6)
       out = run('wait 300; page')
@@ -539,6 +571,44 @@ try:
       check('tv app: Right on the volume: the device\'s up', str(page.evaluate('PicoAmpAndroid.vols')), r'\[45\]')
       page.evaluate('picoamp.systemVolume(70)')
       check('tv app: the device\'s buttons: shown', run('wait 100; status'), r'vol=70 ')
+
+      # the app's pictures from the network: a media server, PicoAmp for Windows, a share
+      page.goto(URL + '&tv=1&bridge=off&netbase=http://127.0.0.1:%d/net/' % NET_PORT)
+      page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
+      answers = []
+      page.on('dialog', lambda d: d.accept(answers.pop(0)) if answers else d.dismiss())
+      out = run('key Esc; key I; wait 100; page')
+      check('net pictures: no folder yet', out, r"pictures browse folder='' entries=1")
+      run('key Enter')
+      page.wait_for_selector('#netpick .items div:has-text("Fake NAS")', timeout=5000)
+      shot('tv_netpick')
+      items = page.eval_on_selector_all('#netpick .items div', 'e => e.map(d => d.textContent)')
+      check('net pictures: the choice (servers found, a share, PicoAmp for Windows; no device folder on a TV)', ' | '.join(items),
+            r'^Media server: Fake NAS \| A Windows or NAS share\u2026 \| PicoAmp for Windows \(its pictures\)\u2026$')
+      tvs('ok')
+      out = run('wait 600; page')
+      check('net pictures: a media server\'s folder', out, r"pictures browse folder='' entries=5 folders=2 pictures=3")
+      check('net pictures: asked the app for it', '\n'.join(net_log), r'/net/list\?src=dlna:http://10\.0\.0\.9:9000/desc\.xml&path=$')
+      out = run('key Down; key Down; key Enter; wait 1500; page')
+      check('net pictures: a picture shows', out, r'pictures view .*have=1')
+      check('net pictures: fetched', '\n'.join(net_log), r'/net/file\?src=dlna:.*&path=a\.jpg')
+      run('key Esc; wait 100; key Up; key Up; key Up; key Up; key Up; key Enter')
+      page.wait_for_selector('#netpick .items div:has-text("no media servers")', timeout=5000)
+      items = page.eval_on_selector_all('#netpick .items div', 'e => e.map(d => d.textContent)')
+      check('net pictures: the one before remembered', ' | '.join(items), r'^\u2605 Media server Fake NAS \| \(no media servers found\)')
+      answers[:] = ['127.0.0.1:%d' % NET_PORT]
+      tvs('down', 'down', 'down', 'ok')
+      out = run('wait 600; page')
+      check('net pictures: PicoAmp for Windows\' pictures', '\n'.join(net_log[-3:]), r'(?m)^/pics/list\?path=$')
+      check('net pictures: (its folder)', out, r"entries=5 folders=2 pictures=3")
+      run('key Up; key Up; key Up; key Up; key Up; key Enter')
+      page.wait_for_selector('#netpick', timeout=5000)
+      answers[:] = [r'\\nas\photo\Trip one', r'HOME\me', 'p@ss w']
+      n = len(page.eval_on_selector_all('#netpick .items div', 'e => e'))
+      tvs(*(['down'] * (n - 2)), 'ok')
+      out = run('wait 600; page')
+      check('net pictures: a share (its user and password to the app)', '\n'.join(net_log[-3:]), r'/net/list\?src=smb://HOME%5Cme:p%40ss%20w@nas/photo/Trip%20one&path=$')
+      tvs('back') if page.evaluate('!!document.getElementById("netpick")') else None
       page.goto(URL + '&bridge=off')
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
 
