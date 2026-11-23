@@ -688,7 +688,8 @@ void ui_cover_follow(void) { cover_follow(); }
 // ---------------- the cover, sharp (cfg.cover_sharp, F5) ----------------
 // The platform draws the cover's own picture in the screen's resolution over the MSX's 8-bit one:
 // on the player's cover view (the square of 80 x 80 MSX pixels: the picture's middle, as the MSX
-// takes it) and on the full screen page's Cover (the picture whole, between its text rows).
+// takes it) and on the full screen page's Cover (the picture whole, on all of the screen, as big as the MSX's:
+// its dot is 1.1 times as wide as high, so the picture 10/11 as wide).
 bool fs_is_cover(void);
 int ui_sharp_cover(int r[4], const uint8_t **data, size_t *len, unsigned *gen)
 {
@@ -702,7 +703,7 @@ int ui_sharp_cover(int r[4], const uint8_t **data, size_t *len, unsigned *gen)
     else if (page == PG_FULL && fs_is_cover())
     {
         kind = 2;
-        r[0] = 0, r[1] = 8, r[2] = GFX_W, r[3] = 21 * 8;
+        r[0] = 0, r[1] = 0, r[2] = GFX_W, r[3] = GFX_H;     // (as the MSX's: all of the screen)
     }
     if (!kind || !cover_source(data, len)) return 0;
     // (a default picture: its big one)

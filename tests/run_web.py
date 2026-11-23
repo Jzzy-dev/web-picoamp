@@ -180,7 +180,7 @@ try:
       page.keyboard.press('F5')
       out = run('wait 400; page')
       shot('fullcover_sharp')
-      check('sharp covers: F5 on full screen (whole)', out, r'page 1 sharp=full 0,8 256x168')
+      check('sharp covers: F5 on full screen (whole)', out, r'page 1 sharp=full 0,0 256x192')
       px, side = page.evaluate('picoamp.pixel(128, 96)'), page.evaluate('picoamp.pixel(8, 96)')
       if not exact(px) or side != [0, 0, 0]: fails += 1; print('FAIL sharp covers: full screen not the picture\'s own pixels: %s, beside %s' % (px, side))
       else: print('ok   sharp covers: full screen: its own pixels, black beside')

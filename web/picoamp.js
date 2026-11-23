@@ -1072,7 +1072,8 @@ function sharpCover(g, d) {
         const m = Math.min(iw, ih);
         g.drawImage(shImg, (iw - m) / 2, (ih - m) / 2, m, m, x, y, w, h);
     } else {
-        const k = Math.min(w / iw, h / ih), dw = iw * k, dh = ih * k;
+        // (as big as the MSX's: its dot is 1.1 as wide as high, so the picture 10/11 as wide)
+        const k = Math.min(w / (iw * 10 / 11), h / ih), dw = iw * 10 / 11 * k, dh = ih * k;
         g.fillStyle = '#000';
         g.fillRect(x, y, w, h);
         g.drawImage(shImg, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
