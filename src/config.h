@@ -48,6 +48,7 @@ typedef struct
     char   mk_list[1024];    // My list: Yahoo Finance symbols, a comma between them
     // [cover]
     bool   cover_rows;       // five colours of its own for every row of the cover's cells (else for all)
+    bool   cover_sharp;      // the cover's own picture, sharp, over the MSX's (F5); else as the MSX (8-bit)
     int    keep_logos, keep_covers;   // how many are kept (0: all)
     // [pictures]
     int    pic_saver;        // the screensaver after this many minutes without a key (0: off)

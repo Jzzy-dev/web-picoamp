@@ -981,7 +981,7 @@ function mediaPosition(a) {
 }
 const K = { ENTER: 13, BS: 8, ESC: 27, UP: 0x100, DOWN: 0x101, LEFT: 0x102, RIGHT: 0x103, PGUP: 0x104, PGDN: 0x105,
     HOME: 0x106, END: 0x107, DEL: 0x108, PLAY: 0x109, STOP: 0x10A, NEXT: 0x10B, PREV: 0x10C, VUP: 0x10D, VDOWN: 0x10E,
-    MUTE: 0x10F, CUP: 0x110, CDOWN: 0x111, F1: 0x120 };
+    MUTE: 0x10F, CUP: 0x110, CDOWN: 0x111, F1: 0x120, F5: 0x121 };
 if (ms) {
     const h = (a, k) => { try { ms.setActionHandler(a, () => { ensureCtx(); X.web_key(k); }); } catch { } };
     h('play', K.PLAY); h('pause', K.PLAY); h('stop', K.STOP); h('nexttrack', K.NEXT); h('previoustrack', K.PREV);
@@ -1043,12 +1043,47 @@ function draw() {
     g2.imageSmoothingEnabled = !exact;
     g2.imageSmoothingQuality = 'high';
     g2.drawImage(big, dest.x, dest.y, dest.w, dest.h);
+    sharpCover(g2, dest);
+}
+
+// ---------------- the cover, sharp (F5) ----------------
+// The cover's own picture over the MSX's 8-bit one, where the program says (the player's square:
+// the picture's middle; full screen: whole, the rest black). Decoded once per cover (the browser's).
+let shGen = -1, shSrc = 0, shImg = null, shBuf = 0;
+function sharpCover(g, d) {
+    if (!shBuf) shBuf = X.web_alloc(28);
+    const kind = X.web_sharp_cover(shBuf);
+    if (!kind) return;
+    const o = new Int32Array(mem.buffer, shBuf, 7), [rx, ry, rw, rh, p, n, gen] = o;
+    if (gen !== shGen || p !== shSrc) {
+        shGen = gen; shSrc = p; shImg = null;
+        if (p && n > 0 && window.createImageBitmap) {
+            const bytes = new Uint8Array(mem.buffer, p, n).slice();
+            createImageBitmap(new Blob([bytes])).then(b => { if (shGen === gen && shSrc === p) shImg = b; }).catch(() => { });
+        }
+    }
+    if (!shImg) return;
+    const W = X.web_width(), H = X.web_height(), kx = d.w / W, ky = d.h / H;
+    const x = d.x + rx * kx, y = d.y + ry * ky, w = rw * kx, h = rh * ky, iw = shImg.width, ih = shImg.height;
+    g.save();
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    if (kind === 1) {
+        const m = Math.min(iw, ih);
+        g.drawImage(shImg, (iw - m) / 2, (ih - m) / 2, m, m, x, y, w, h);
+    } else {
+        const k = Math.min(w / iw, h / ih), dw = iw * k, dh = ih * k;
+        g.fillStyle = '#000';
+        g.fillRect(x, y, w, h);
+        g.drawImage(shImg, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+    }
+    g.restore();
 }
 
 // ---------------- keys and the mouse ----------------
 const named = { Enter: K.ENTER, Backspace: K.BS, Escape: K.ESC, ArrowLeft: K.LEFT, ArrowRight: K.RIGHT,
     PageUp: K.PGUP, PageDown: K.PGDN, Home: K.HOME, End: K.END, Delete: K.DEL, MediaPlayPause: K.PLAY,
-    MediaStop: K.STOP, MediaTrackNext: K.NEXT, MediaTrackPrevious: K.PREV, Tab: 9, F1: K.F1 };
+    MediaStop: K.STOP, MediaTrackNext: K.NEXT, MediaTrackPrevious: K.PREV, Tab: 9, F1: K.F1, F5: K.F5 };
 const scaleNames = ['Scaling: fit, 4:3, sharp', 'Scaling: whole multiples', 'Scaling: stretch to the window'];
 
 function message(s, err) { withStr(s, p => X.web_message(p, err ? 1 : 0)); }

@@ -29,6 +29,7 @@ static int key_code(const char *k)
         { "BS", K_BS }, { "Esc", K_ESC }, { "Space", ' ' }, { "Del", K_DEL }, { "Home", K_HOME }, { "End", K_END },
         { "PgUp", K_PGUP }, { "PgDn", K_PGDN }, { "Tab", '\t' }, { "CtrlUp", K_CTRL_UP }, { "CtrlDown", K_CTRL_DOWN },
         { "F1", K_F1 },
+        { "F5", K_F5 },
     };
     for (unsigned i = 0; i < sizeof names / sizeof names[0]; i++) if (!u_stricmp(k, names[i].n)) return names[i].c;
     return (unsigned char)k[0];

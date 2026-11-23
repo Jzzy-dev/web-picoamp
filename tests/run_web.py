@@ -171,7 +171,31 @@ try:
       px = page.evaluate('picoamp.pixel(128, 96)')
       if not (px[1] > px[0] + 60 and px[1] > px[2] + 60): fails += 1; print('FAIL the full-screen cover is not green: %s' % px)
       else: print('ok   the full-screen cover')
-      run('key Z; key V')
+      # F5 (the browser's own key: not a reload): the cover sharp, its own pixels (0x20D040 exactly,
+      # the MSX's palette only near it); full screen whole (black beside it), on the player its square
+      exact = lambda px: abs(px[0] - 0x20) <= 2 and abs(px[1] - 0xD0) <= 2 and abs(px[2] - 0x40) <= 2
+      check('sharp covers: as the MSX first', str(page.evaluate('picoamp.pixel(128, 96)')), r'.')
+      if exact(page.evaluate('picoamp.pixel(128, 96)')): fails += 1; print('FAIL sharp covers: already exact before F5')
+      page.evaluate('window.notReloaded = 1')
+      page.keyboard.press('F5')
+      out = run('wait 400; page')
+      shot('fullcover_sharp')
+      check('sharp covers: F5 on full screen (whole)', out, r'page 1 sharp=full 0,8 256x168')
+      px, side = page.evaluate('picoamp.pixel(128, 96)'), page.evaluate('picoamp.pixel(8, 96)')
+      if not exact(px) or side != [0, 0, 0]: fails += 1; print('FAIL sharp covers: full screen not the picture\'s own pixels: %s, beside %s' % (px, side))
+      else: print('ok   sharp covers: full screen: its own pixels, black beside')
+      out = run('key Z; wait 400; page')
+      shot('cover_sharp')
+      check('sharp covers: on the player (its square)', out, r'page 0 cover=ready sharp=player 8,48 80x80')
+      px = page.evaluate('picoamp.pixel(48, 88)')
+      if not exact(px): fails += 1; print('FAIL sharp covers: the player\'s not its own pixels: %s' % px)
+      else: print('ok   sharp covers: the player: its own pixels')
+      page.keyboard.press('F5')
+      out = run('wait 300; page')
+      check('sharp covers: F5 again: as the MSX', out, r'page 0 cover=ready$')
+      if exact(page.evaluate('picoamp.pixel(48, 88)')): fails += 1; print('FAIL sharp covers: still sharp after F5')
+      check('sharp covers: the page was not reloaded by F5', str(page.evaluate('window.notReloaded')), r'^1$')
+      run('key V')
 
       # the radio: a station with CORS (Web Audio), one without (as it is), one that is gone
       lists = {'Test.m3u': '#EXTM3U\r\n#EXTINF:-1,Local FM\r\n%s/stream.mp3\r\n#EXTINF:-1,No CORS FM\r\n%s/nocors.mp3\r\n#EXTINF:-1,Gone FM\r\n%s/dead.mp3\r\n' % (SVC, SVC, SVC)}

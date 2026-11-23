@@ -685,6 +685,40 @@ static void cover_follow(void)
 
 void ui_cover_follow(void) { cover_follow(); }
 
+// ---------------- the cover, sharp (cfg.cover_sharp, F5) ----------------
+// The platform draws the cover's own picture in the screen's resolution over the MSX's 8-bit one:
+// on the player's cover view (the square of 80 x 80 MSX pixels: the picture's middle, as the MSX
+// takes it) and on the full screen page's Cover (the picture whole, between its text rows).
+bool fs_is_cover(void);
+int ui_sharp_cover(int r[4], const uint8_t **data, size_t *len, unsigned *gen)
+{
+    if (!cfg.cover_sharp || help_on || cover_state() != COVER_READY) return 0;
+    int kind = 0;
+    if (page == PG_PLAYER && cfg.view == 2 && !eq_open && !searching)
+    {
+        kind = 1;
+        r[0] = 8, r[1] = 48, r[2] = 80, r[3] = 80;
+    }
+    else if (page == PG_FULL && fs_is_cover())
+    {
+        kind = 2;
+        r[0] = 0, r[1] = 8, r[2] = GFX_W, r[3] = 21 * 8;
+    }
+    if (!kind || !cover_source(data, len)) return 0;
+    // (a default picture: its big one)
+    for (int k = 0; k < DEFAULT_PICTURES; k++)
+        if (*len == default_picture_len[k] && !memcmp(*data, default_picture[k], *len)) { *data = default_picture_big[k]; *len = default_picture_big_len[k]; break; }
+    *gen = cover_gen();
+    return kind;
+}
+
+// F5: the covers sharp or as the MSX
+void ui_sharp_toggle(void)
+{
+    cfg.cover_sharp = !cfg.cover_sharp;
+    ui_message(cfg.cover_sharp ? "Covers: sharp (their own pixels)" : "Covers: as the MSX (8-bit)", false);
+}
+
 static void draw_cover(void)
 {
     cover_follow();
@@ -912,8 +946,8 @@ static void draw_help(void)
         { A_NORM, "? or F1    this help (or click the ?)" },
         { COL(CYAN, NAVY), "Page: F11, Alt+Enter or a double click" },
         { COL(CYAN, NAVY), "  outside the picture: full screen," },
-        { COL(CYAN, NAVY), "  F2 scaling: fit / whole / stretch," },
-        { COL(CYAN, NAVY), "  F3 scan lines; media keys work" },
+        { COL(CYAN, NAVY), "  F2 scaling, F3 scan lines, F5 covers:" },
+        { COL(CYAN, NAVY), "  sharp / as the MSX; media keys work" },
         { COL(CYAN, NAVY), "Mouse: click, again to play; the right" },
         { COL(CYAN, NAVY), "  button goes back, the wheel scrolls" },
         { COL(CYAN, NAVY), "  (on VOL: the wheel sets the volume)" },
@@ -1079,6 +1113,7 @@ void ui_key(int k)
 {
     last_input = sys_millis();
     if (k == K_F1) { help_on = !help_on; return; }
+    if (k == K_F5) { ui_sharp_toggle(); return; }
     if (help_on) { help_on = false; return; }
     if (page != PG_PLAYER) { pages[page]->key(k); return; }
     if (searching)
@@ -1279,6 +1314,15 @@ char *ui_describe(bool the_list)
         o += (size_t)snprintf(b + o, n - o, "page %d%s", page, help_on ? " help" : "");
         if (page == PG_PLAYER && !help_on && cfg.view == 2)
             o += (size_t)snprintf(b + o, n - o, " cover=%s", cover_state() == COVER_READY ? "ready" : cover_state() == COVER_MAKING ? "making" : "none");
+        if (!help_on)
+        {
+            int r[4];
+            const uint8_t *d;
+            size_t dn;
+            unsigned g;
+            int k = ui_sharp_cover(r, &d, &dn, &g);
+            if (k) o += (size_t)snprintf(b + o, n - o, " sharp=%s %d,%d %dx%d (%u bytes)", k == 1 ? "player" : "full", r[0], r[1], r[2], r[3], (unsigned)dn);
+        }
         if (page != PG_PLAYER && pages[page]->describe) { b[o++] = '\n'; pages[page]->describe(b + o, n - o); }
     }
     return b;

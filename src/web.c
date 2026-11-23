@@ -256,6 +256,21 @@ bool plat_decode_image(const uint8_t *data, size_t len) { return js_decode_image
 
 // a picture the page decoded (RGB rows)
 EXPORT(web_cover_rgb) void web_cover_rgb(int w, int h, const uint8_t *rgb) { cover_from_rgb(w, h, rgb, w * 3); }
+// the cover drawn sharp (F5): its kind (0 none now, 1 the player's square, 2 full screen); o: x, y, w, h
+// (MSX pixels), the picture's bytes and their length, its generation
+EXPORT(web_sharp_cover) int web_sharp_cover(int32_t *o)
+{
+    const uint8_t *d;
+    size_t n;
+    unsigned g;
+    int r[4], k = started ? ui_sharp_cover(r, &d, &n, &g) : 0;
+    if (!k) return 0;
+    for (int i = 0; i < 4; i++) o[i] = r[i];
+    o[4] = (int32_t)(uintptr_t)d;
+    o[5] = (int32_t)n;
+    o[6] = (int32_t)g;
+    return k;
+}
 // an image the page found in the track's folder (its bytes)
 EXPORT(web_cover_bytes) void web_cover_bytes(const uint8_t *data, int len) { cover_from_bytes(data, (size_t)len); }
 // a station's logo (or len 0: it has none)

@@ -104,6 +104,7 @@ void config_load(void)
         else if (!u_stricmp(k, "alarm_name")) u_copy(cfg.alarm_name, sizeof cfg.alarm_name, v);
         else if (!u_stricmp(k, "sort")) cfg.news_by_feed = !u_stricmp(v, "feed");
         else if (!u_stricmp(k, "rows")) cfg.cover_rows = yes(v);
+        else if (!u_stricmp(k, "sharp")) cfg.cover_sharp = yes(v);
         else if (!u_stricmp(k, "region"))
         {
             for (int i = 0; i < 3; i++) if (!u_stricmp(v, (const char *const[]){ "europe", "americas", "asia" }[i])) cfg.mk_region = i;
@@ -176,6 +177,8 @@ void config_save(void)
         "[cover]\r\n"
         "; rows: five colours of its own for every row of the cover's cells (as the MSX); off: five for all of it\r\n"
         "rows = %s\r\n"
+        "; sharp: the cover in its own resolution over the MSX's (F5); off: as the MSX shows it (8-bit)\r\n"
+        "sharp = %s\r\n"
         "; keeplogos, keepcovers: how many are kept (the ones shown longest ago go; 0: all)\r\n"
         "keeplogos = %d\r\nkeepcovers = %d\r\n"
         "[pictures]\r\n"
@@ -196,6 +199,6 @@ void config_save(void)
         cfg.alarm_play, cfg.alarm_name, cfg.news_by_feed ? "feed" : "date",
         (const char *const[]){ "europe", "americas", "asia" }[cfg.mk_region % 3], (const char *const[]){ "list", "risers", "fallers" }[cfg.mk_sort % 3],
         (const char *const[]){ "1d", "5d", "1m", "6m", "ytd", "1y", "5y", "all" }[cfg.mk_range % 8], cfg.mk_refresh, cfg.mk_list,
-        cfg.cover_rows ? "on" : "off", cfg.keep_logos, cfg.keep_covers, cfg.pic_saver, cfg.pic_interval, cfg.pic_shuffle ? "yes" : "no", cfg.pic_folder);
+        cfg.cover_rows ? "on" : "off", cfg.cover_sharp ? "on" : "off", cfg.keep_logos, cfg.keep_covers, cfg.pic_saver, cfg.pic_interval, cfg.pic_shuffle ? "yes" : "no", cfg.pic_folder);
     if (n > 0) sys_write_file(ini_path(), buf, (size_t)n);
 }
