@@ -8,7 +8,7 @@ WASI_SDK ?= $(firstword $(wildcard /opt/wasi-sdk $(HOME)/tools/wasi-sdk-25.0-x86
 CC       := $(WASI_SDK)/bin/clang
 VERSION  ?= 0.1.0
 
-SRC     = src/web.c src/audio_web.c src/news.c src/newsfeed.c src/markets.c src/markets_cat.c src/mktsvc.c src/gfx.c src/ui.c src/fullscreen.c src/clock.c src/weather.c \
+SRC     = src/web.c src/audio_web.c src/news.c src/newsfeed.c src/markets.c src/markets_cat.c src/mktsvc.c src/lyrics.c src/lyricspage.c src/gfx.c src/ui.c src/fullscreen.c src/clock.c src/weather.c \
           src/wxsvc.c src/viz.c src/eq.c src/library.c src/radiodir.c src/json.c src/config.c src/tags.c \
           src/util.c src/script.c src/cover.c src/pva_cover.c src/defaults.c src/picture.c src/pics.c src/sonos_web.c third_party/tjpgd/tjpgd.c
 HEADERS = $(wildcard src/*.h)
