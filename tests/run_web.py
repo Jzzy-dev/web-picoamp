@@ -60,10 +60,32 @@ class NetFake(http.server.BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         net_log.append(urllib.parse.unquote(self.path))
+        rng = self.headers.get('Range')
+        if rng: net_log.append('range ' + rng)
         rel = q.get('path', [''])[0].strip('/')
-        full = os.path.join(P, *rel.split('/')) if rel else P
+        # (music: the test's music folder, M; pictures: P)
+        music = q.get('kind', [''])[0] == 'music' or u.path.startswith('/music/')
+        root = M if music else P
+        full = os.path.join(root, *rel.split('/')) if rel else root
         code, typ, body = 200, 'text/plain; charset=utf-8', b''
+        extra = {}
         if u.path == '/net/servers': typ, body = 'application/json', json.dumps([{'src': 'dlna:http://10.0.0.9:9000/desc.xml', 'name': 'Fake NAS'}]).encode()
+        elif music and u.path in ('/net/list', '/music/list') and os.path.isdir(full):
+            body = ''.join('%s %s\n' % ('d' if os.path.isdir(os.path.join(full, n)) else 'f', n) for n in sorted(os.listdir(full))
+                           if os.path.isdir(os.path.join(full, n)) or n.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg'))).encode()
+        elif music and u.path in ('/net/file', '/music/file') and os.path.isfile(full):
+            # a song: as the app and PicoAmp for Windows give it (Range: a part, 206)
+            data = open(full, 'rb').read()
+            typ = 'audio/wav' if full.endswith('.wav') else 'audio/mpeg'
+            extra = {'Accept-Ranges': 'bytes', 'Access-Control-Expose-Headers': 'Content-Range, Content-Length'}
+            m = re.match(r'bytes=(\d*)-(\d*)', rng or '')
+            if m:
+                a = int(m.group(1)) if m.group(1) else max(0, len(data) - int(m.group(2)))
+                b = int(m.group(2)) if m.group(1) and m.group(2) else len(data) - 1
+                b = min(b, len(data) - 1)
+                code, body = 206, data[a:b + 1]
+                extra['Content-Range'] = 'bytes %d-%d/%d' % (a, b, len(data))
+            else: body = data
         elif u.path in ('/net/list', '/pics/list') and os.path.isdir(full):
             body = ''.join('%s %s\n' % ('d' if os.path.isdir(os.path.join(full, n)) else 'f', n) for n in sorted(os.listdir(full))
                            if os.path.isdir(os.path.join(full, n)) or n.lower().endswith(('.jpg', '.png'))).encode()
@@ -73,8 +95,15 @@ class NetFake(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', typ)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Access-Control-Allow-Origin', '*')
+        for k, v in extra.items(): self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(body)
+        try: self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError): pass
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Headers', 'Range')
+        self.end_headers()
 net_srv = http.server.ThreadingHTTPServer(('127.0.0.1', NET_PORT), NetFake)
 threading.Thread(target=net_srv.serve_forever, daemon=True).start()
 log = open(os.path.join(T, 'svc.log'), 'w')
@@ -598,7 +627,8 @@ try:
 
       # the app's volume is the device's: shown here, set there
       page.add_init_script('''window.PicoAmpAndroid = { vols: [], getVolume: () => 40, volumeFixed: () => false,
-          setVolume(v) { this.vols.push(v); }, volumeStep(d) { this.vols.push(d > 0 ? 'up' : 'down'); }, exit() { }, isTv: () => true };''')
+          setVolume(v) { this.vols.push(v); }, volumeStep(d) { this.vols.push(d > 0 ? 'up' : 'down'); }, exit() { }, isTv: () => true,
+          granted: false, asked: 0, musicAccess() { return this.granted; }, askMusicAccess() { this.asked++; setTimeout(() => { this.granted = true; }, 300); } };''')
       page.goto(URL + '&tv=1&bridge=off')
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
       run('wait 300')
@@ -646,6 +676,51 @@ try:
       tvs(*(['down'] * (n - 2)), 'ok')
       out = run('wait 600; page')
       check('net pictures: a share (its user and password to the app)', '\n'.join(net_log[-3:]), r'/net/list\?src=smb://HOME%5Cme:p%40ss%20w@nas/photo/Trip%20one&path=$')
+      tvs('back') if page.evaluate('!!document.getElementById("netpick")') else None
+
+      # the app's music: the same choice (and the music on the TV itself), played from its address,
+      # streamed (Range: the tags, seeking)
+      run('key Esc; key BS; key BS; key BS; key Home; key Down; key Enter')
+      page.wait_for_selector('#netpick .items div:has-text("Fake NAS")', timeout=5000)
+      shot('tv_netmusic')
+      check('net music: its title', page.text_content('#netpick h2'), r'^Music from$')
+      def pick_item(label):
+          its = page.eval_on_selector_all('#netpick .items div', 'e => e.map(d => d.textContent)')
+          tvs(*(['down'] * next(i for i, t in enumerate(its) if label in t)), 'ok')
+      def play_name(name):
+          lines = run('key Home; list').split('\n')[1:]
+          k = next(i for i, l in enumerate(lines) if l[4:].strip() == name)
+          return run('key Home; ' + 'key Down; ' * k + 'key Enter')
+      items = page.eval_on_selector_all('#netpick .items div', 'e => e.map(d => d.textContent)')
+      check('net music: the choice (the TV\'s own music, a server, a share, PicoAmp for Windows)', ' | '.join(items),
+            r'^Media server: Fake NAS \| Music on this TV \(and its USB sticks\) \| A Windows or NAS share\u2026 \| PicoAmp for Windows \(its music\)\u2026$')
+      pick_item('Media server: Fake NAS')
+      out = run('wait 800; list')
+      check('net music: a media server\'s music', out, r'list Music \(Media server Fake NAS\)|01 Sine\.mp3')
+      check('net music: asked as music', '\n'.join(net_log), r'/net/list\?src=dlna:http://10\.0\.0\.9:9000/desc\.xml&kind=music&path=$')
+      n0 = len(net_log)
+      play_name('01 Sine.mp3')
+      out = run('wait 2500; status')
+      check('net music: it plays, its tags read (by Range)', out, r"state=1 elapsed=\d+/30 .*title='Sine Caf\u00e9 Song' artist='Unit Tester'")
+      check('net music: its file streamed', '\n'.join(net_log[n0:]), r'/net/file\?src=dlna:.*&kind=music&path=01 Sine\.mp3[\s\S]*range bytes=0-524287')
+      n0 = len(net_log)
+      run('key .; key .; wait 1500')
+      check('net music: seeking (the player asks a part)', '\n'.join(net_log[n0:]) + '|' + run('status'), r'range bytes=\d+-|elapsed=(2\d|1\d)')
+      run('key S; key BS; key Home; key Down; key Down; key Enter')
+      page.wait_for_selector('#netpick .items div:has-text("on this TV")', timeout=5000)
+      items = page.eval_on_selector_all('#netpick .items div', 'e => e.map(d => d.textContent)')
+      check('net music: the server remembered', ' | '.join(items), r'^\u2605 Media server Fake NAS \| .*Music on this TV')
+      pick_item('Music on this TV')
+      out = run('wait 1500; list')
+      check('net music: the TV\'s own (Android asked once)', str(page.evaluate('PicoAmpAndroid.asked')) + '|' + out, r'^1\|[\s\S]*01 Sine\.mp3')
+      check('net music: the TV\'s own from the app', '\n'.join(net_log[-3:]), r'/net/list\?src=local:&kind=music&path=')
+      run('key BS; key Home; key Down; key Down; key Enter')
+      page.wait_for_selector('#netpick .items div:has-text("its music")', timeout=5000)
+      answers[:] = ['127.0.0.1:%d' % NET_PORT]
+      items = page.eval_on_selector_all('#netpick .items div', 'e => e.map(d => d.textContent)')
+      tvs(*(['down'] * items.index('PicoAmp for Windows (its music)\u2026')), 'ok')
+      out = run('wait 800; list')
+      check('net music: PicoAmp for Windows\' music', '\n'.join(net_log[-3:]) + '|' + out, r'(?m)^/music/list\?path=[\s\S]*01 Sine\.mp3')
       tvs('back') if page.evaluate('!!document.getElementById("netpick")') else None
       page.goto(URL + '&bridge=off')
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')

@@ -173,6 +173,10 @@ async function idbGet(k) { const db = await idb(); return new Promise(ok => { co
 
 async function restoreMusic() {
     try {
+        const n = JSON.parse(localStorage.getItem(NETK.music.cur) || 'null');
+        if (n && n.net) { music = n; return; }
+    } catch { }
+    try {
         const h = await idbGet('music');
         if (h && h.kind === 'directory') music = { name: h.name, handle: h };
     } catch { }
@@ -210,16 +214,18 @@ function pickWithInput(dflt) {
 }
 
 function js_music_pick() {
+    if (tvMode || hasNet()) { musicPick = netPickOpen('music'); return; }
     if (window.showDirectoryPicker) {
         musicPick = window.showDirectoryPicker({ id: 'picoamp-music', mode: 'read', startIn: 'music' })
-            .then(async h => { music = { name: h.name, handle: h }; await idbSet('music', h).catch(() => { }); return true; })
+            .then(async h => { music = { name: h.name, handle: h }; try { localStorage.removeItem(NETK.music.cur); } catch { } await idbSet('music', h).catch(() => { }); return true; })
             .catch(() => false);
-    } else musicPick = pickWithInput('Music').then(root => { if (root) music = root; return !!root; });
+    } else musicPick = pickWithInput('Music').then(root => { if (root) { music = root; try { localStorage.removeItem(NETK.music.cur); } catch { } } return !!root; });
 }
 
 async function musicDir(path) { return rootDir(music, path, 'music'); }
 async function rootDir(root, path, what) {
     if (!root) throw new Error(`No ${what} folder chosen`);
+    if (root.net) return { list: async () => (await (await netFetch(root.net, 'list', path)).text()).split('\n').filter(l => /^[df] ./.test(l)).map(l => [l[0], l.slice(2)]) };
     const parts = path ? path.split('/') : [];
     if (root.tree) {
         let d = root.tree;
@@ -251,6 +257,11 @@ async function musicFile(path) {
     const parts = rel.split('/');
     const name = parts.pop();
     if (!music) throw new Error('No music folder');
+    if (music.net) {
+        // from the network: played from its address (streamed, Range for seeking and the tags)
+        const url = `${music.net.base}file?${music.net.q}path=${encodeURIComponent(rel)}`;
+        return { netUrl: url, name, arrayBuffer: () => fetch(url, { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(`The network folder said ${r.status}`); return r.arrayBuffer(); }) };
+    }
     if (music.tree) {
         let d = music.tree;
         for (const p of parts) d = d.children.get(p);
@@ -282,7 +293,7 @@ let pics = null;               // { name, handle }, { name, tree } or { name, ne
 let picsPick = null;
 async function restorePics() {
     try {
-        const n = JSON.parse(localStorage.getItem('picoamp-pics-net') || 'null');
+        const n = JSON.parse(localStorage.getItem(NETK.pictures.cur) || 'null');
         if (n && n.net) { pics = n; return; }
     } catch { }
     try {
@@ -290,28 +301,37 @@ async function restorePics() {
         if (h && h.kind === 'directory') pics = { name: h.name, handle: h };
     } catch { }
 }
-// ---- pictures from the network: a Windows or NAS share, a media server (the Android app does those
-// two: /net/ there) and PicoAmp for Windows (its MSX link's port: /pics/)
+// ---- pictures and music from the network: a Windows or NAS share, a media server (the Android app
+// does those two: /net/ there), PicoAmp for Windows (its MSX link's port: /pics/, /music/) and, in
+// the app, the music on the TV itself (its USB sticks too: Android's own music library)
 const hasNet = () => !!(window.PicoAmpAndroid && window.PicoAmpAndroid.getVolume) || params.get('netpics') === '1';
-function netSources() { try { return JSON.parse(localStorage.getItem('picoamp-pics-sources') || '[]'); } catch { return []; } }
-function setNetSources(a) { try { localStorage.setItem('picoamp-pics-sources', JSON.stringify(a.slice(0, 12))); } catch { } }
-function netOf(src) {
-    if (src.kind === 'win') return { base: `http://${src.host}/pics/`, q: '' };
-    return { base: (params.get('netbase') || '/net/'), q: 'src=' + encodeURIComponent(src.src) + '&' };
+const hasLocalMusic = () => !!(window.PicoAmpAndroid && window.PicoAmpAndroid.musicAccess);
+const NETK = {
+    pictures: { title: 'Pictures from', sources: 'picoamp-pics-sources', cur: 'picoamp-pics-net', win: '/pics/', winLabel: 'PicoAmp for Windows (its pictures)\u2026',
+                share: '\\\\PC\\Pictures or \\\\NAS\\photo\\Holidays', set: r => { pics = r; }, local: 'Pictures', idb: 'pictures', start: 'pictures' },
+    music:    { title: 'Music from', sources: 'picoamp-music-sources', cur: 'picoamp-music-net', win: '/music/', winLabel: 'PicoAmp for Windows (its music)\u2026',
+                share: '\\\\PC\\Music or \\\\NAS\\music\\Jazz', set: r => { music = r; }, local: 'Music', idb: 'music', start: 'music' },
+};
+function netSources(kind = 'pictures') { try { return JSON.parse(localStorage.getItem(NETK[kind].sources) || '[]'); } catch { return []; } }
+function setNetSources(a, kind = 'pictures') { try { localStorage.setItem(NETK[kind].sources, JSON.stringify(a.slice(0, 12))); } catch { } }
+function netOf(src, kind = 'pictures') {
+    if (src.kind === 'win') return { base: `http://${src.host}${NETK[kind].win}`, q: '' };
+    return { base: (params.get('netbase') || '/net/'), q: 'src=' + encodeURIComponent(src.src) + '&' + (kind === 'music' ? 'kind=music&' : '') };
 }
 async function netFetch(net, what, path) {
     const r = await fetch(`${net.base}${what}?${net.q}path=${encodeURIComponent(path)}`, { cache: 'no-store' });
     if (!r.ok) throw new Error((await r.text().catch(() => '')).trim().slice(0, 80) || `The network folder said ${r.status}`);
     return r;
 }
-function useNet(src) {
-    pics = { name: src.label, net: netOf(src) };
-    try { localStorage.setItem('picoamp-pics-net', JSON.stringify(pics)); } catch { }
-    setNetSources([src, ...netSources().filter(o => o.label !== src.label)]);
+function useNet(src, kind = 'pictures') {
+    const root = { name: src.label, net: netOf(src, kind) };
+    NETK[kind].set(root);
+    try { localStorage.setItem(NETK[kind].cur, JSON.stringify(root)); } catch { }
+    setNetSources([src, ...netSources(kind).filter(o => o.label !== src.label)], kind);
     return true;
 }
-function smbSource() {
-    const where = prompt('The share: \\\\PC\\Pictures or \\\\NAS\\photo\\Holidays (a folder in it too)');
+function smbSource(kind = 'pictures') {
+    const where = prompt(`The share: ${NETK[kind].share} (a folder in it too)`);
     if (!where || !where.trim()) return null;
     const parts = where.trim().replace(/^smb:\/\//i, '').replace(/\//g, '\\').replace(/^\\+/, '').split('\\').filter(Boolean);
     if (parts.length < 2) { alert('A share is \\\\PC\\share: the PC (or NAS) and the share'); return null; }
@@ -327,8 +347,24 @@ function winSource() {
     if (!/:\d+$/.test(h)) h += ':8765';
     return { kind: 'win', label: 'PicoAmp for Windows on ' + h, host: h };
 }
+// the music on the TV itself: Android asks once whether PicoAmp may read it
+function localMusic() {
+    const A = window.PicoAmpAndroid;
+    const use = () => useNet({ kind: 'local', label: 'Music on this TV', src: 'local:' }, 'music');
+    if (A.musicAccess()) return use();
+    A.askMusicAccess();
+    return new Promise(ok => {
+        const t0 = Date.now();
+        const look = () => {
+            if (A.musicAccess()) ok(use());
+            else if (Date.now() - t0 > 90000 || A.musicAsked && A.musicAsked() === 'no') { message('PicoAmp may not read the music on this TV (Android\'s settings: Apps, PicoAmp, Permissions)', true); ok(false); }
+            else setTimeout(look, 400);
+        };
+        setTimeout(look, 400);
+    });
+}
 // the choice: a list over the page (the remote's arrows and OK, or clicks); resolves true when chosen
-let netPick = null;               // { el, items: [[label, act, saved]], i, done }
+let netPick = null;               // { el, items: [[label, act, saved]], i, done, kind }
 function netPickShow() {
     if (!netPick) return;
     const list = netPick.el.querySelector('.items');
@@ -362,46 +398,48 @@ function netPickAct(a) {
     else if (a === 'longok' && p.items[p.i][2]) {
         // a remembered one: forgotten
         const lab = p.items[p.i][0].replace(/^\u2605 /, '');
-        setNetSources(netSources().filter(o => o.label !== lab));
+        setNetSources(netSources(p.kind).filter(o => o.label !== lab), p.kind);
         p.items.splice(p.i, 1);
         p.i = Math.min(p.i, p.items.length - 1);
     }
     netPickShow();
 }
-function netPickOpen() {
+function netPickOpen(kind = 'pictures') {
+    const K = NETK[kind];
     return new Promise(done => {
         const el = document.createElement('div');
         el.id = 'netpick';
         el.setAttribute('role', 'menu');
-        el.innerHTML = '<h2>Pictures from</h2><div class="items"></div><p>OK: choose &middot; OK held: forget a remembered one &middot; Back: close</p>';
+        el.innerHTML = `<h2>${K.title}</h2><div class="items"></div><p>OK: choose &middot; OK held: forget a remembered one &middot; Back: close</p>`;
         document.body.append(el);
         const local = () => {
             // (the folder picker's answer is the choice's)
             const p = netPick;
             netPick = null;
             p.el.remove();
-            const forgetNet = () => { try { localStorage.removeItem('picoamp-pics-net'); } catch { } };
+            const forgetNet = () => { try { localStorage.removeItem(K.cur); } catch { } };
             (window.showDirectoryPicker
-                ? window.showDirectoryPicker({ id: 'picoamp-pictures', mode: 'read', startIn: 'pictures' })
-                    .then(async h => { pics = { name: h.name, handle: h }; forgetNet(); await idbSet('pictures', h).catch(() => { }); return true; })
+                ? window.showDirectoryPicker({ id: 'picoamp-' + kind, mode: 'read', startIn: K.start })
+                    .then(async h => { K.set({ name: h.name, handle: h }); forgetNet(); await idbSet(K.idb, h).catch(() => { }); return true; })
                     .catch(() => false)
-                : pickWithInput('Pictures').then(root => { if (root) { pics = root; forgetNet(); } return !!root; })).then(done);
+                : pickWithInput(K.local).then(root => { if (root) { K.set(root); forgetNet(); } return !!root; })).then(done);
             return false;
         };
         const items = [];
-        for (const s of netSources()) if (s.kind !== 'smb' || hasNet()) items.push(['\u2605 ' + s.label, () => useNet(s), true]);
+        for (const s of netSources(kind)) if ((s.kind !== 'smb' && s.kind !== 'dlna' && s.kind !== 'local') || hasNet()) items.push(['\u2605 ' + s.label, () => s.kind === 'local' ? localMusic() : useNet(s, kind), true]);
         const at = items.length;
-        if (hasNet()) items.push(['A Windows or NAS share\u2026', () => { const s = smbSource(); return s ? useNet(s) : false; }]);
-        items.push(['PicoAmp for Windows (its pictures)\u2026', () => { const s = winSource(); return s ? useNet(s) : false; }]);
-        if (!tvMode) items.push(['A folder on this device\u2026', local]);
+        if (kind === 'music' && hasLocalMusic() && !netSources(kind).some(o => o.kind === 'local')) items.push(['Music on this TV (and its USB sticks)', localMusic]);
+        if (hasNet()) items.push(['A Windows or NAS share\u2026', () => { const s = smbSource(kind); return s ? useNet(s, kind) : false; }]);
+        items.push([K.winLabel, () => { const s = winSource(); return s ? useNet(s, kind) : false; }]);
+        if (!tvMode) items.push([`A folder on this device\u2026`, local]);
         if (hasNet()) items.push(['(looking for media servers\u2026)', () => false]);
-        netPick = { el, items, i: 0, done };
+        netPick = { el, items, i: 0, done, kind };
         netPickShow();
         if (hasNet()) fetch(`${params.get('netbase') || '/net/'}servers`).then(r => r.json()).catch(() => []).then(list => {
             if (!netPick || netPick.el !== el) return;
             const k = items.findIndex(it => it[0].startsWith('(looking'));
-            const found = (list || []).filter(sv => !netSources().some(o => o.src === sv.src))
-                .map(sv => ['Media server: ' + sv.name, () => useNet({ kind: 'dlna', label: 'Media server ' + sv.name, src: sv.src })]);
+            const found = (list || []).filter(sv => !netSources(kind).some(o => o.src === sv.src))
+                .map(sv => ['Media server: ' + sv.name, () => useNet({ kind: 'dlna', label: 'Media server ' + sv.name, src: sv.src }, kind)]);
             items.splice(k, 1, ...(found.length ? found : [['(no media servers found)', () => false]]));
             items.splice(at, 0, ...items.splice(items.length - (found.length || 1)));     // (the servers after the remembered ones)
             netPickShow();
@@ -1008,13 +1046,35 @@ function js_audio_play(p, n, isFile) {
     if (isFile) {
         musicFile(src).then(async f => {
             if (g !== gen) return;
-            cur.url = URL.createObjectURL(f);
-            cur.size = f.size;
-            el.src = cur.url;
-            el.play().catch(e => { if (g === gen && e.name !== 'AbortError') cErr(playError(e)); });
-            // the tags: the first 512 KB and the last 128 bytes
-            const head = new Uint8Array(await f.slice(0, 512 * 1024).arrayBuffer());
-            const tail = f.size > head.length ? new Uint8Array(await f.slice(Math.max(head.length, f.size - 128)).arrayBuffer()) : new Uint8Array(0);
+            let head, tail;
+            if (f.netUrl) {
+                // from the network: streamed from its address; the tags by Range (the size from its answer)
+                cur.url = f.netUrl;
+                el.src = cur.url;
+                el.play().catch(e => { if (g === gen && e.name !== 'AbortError') cErr(playError(e)); });
+                const part = (a, b) => fetch(f.netUrl, { headers: { Range: `bytes=${a}-${b}` }, cache: 'no-store' });
+                const r = await part(0, 512 * 1024 - 1);
+                if (!r.ok) throw new Error(`The network folder said ${r.status}`);
+                head = new Uint8Array(await r.arrayBuffer());
+                const m = /\/(\d+)\s*$/.exec(r.headers.get('Content-Range') || '');
+                const size = m ? +m[1] : head.length;
+                cur.size = size;
+                if (r.status === 206 && size > head.length) {
+                    const t = await part(Math.max(head.length, size - 128), size - 1);
+                    tail = t.status === 206 ? new Uint8Array(await t.arrayBuffer()) : new Uint8Array(0);
+                } else {
+                    if (r.status === 200 && head.length > 512 * 1024) { tail = head.slice(Math.max(512 * 1024, head.length - 128)); head = head.slice(0, 512 * 1024); }
+                    else tail = new Uint8Array(0);
+                }
+            } else {
+                cur.url = URL.createObjectURL(f);
+                cur.size = f.size;
+                el.src = cur.url;
+                el.play().catch(e => { if (g === gen && e.name !== 'AbortError') cErr(playError(e)); });
+                // the tags: the first 512 KB and the last 128 bytes
+                head = new Uint8Array(await f.slice(0, 512 * 1024).arrayBuffer());
+                tail = f.size > head.length ? new Uint8Array(await f.slice(Math.max(head.length, f.size - 128)).arrayBuffer()) : new Uint8Array(0);
+            }
             if (g !== gen) return;
             const all = new Uint8Array(head.length + tail.length);
             all.set(head); all.set(tail, head.length);

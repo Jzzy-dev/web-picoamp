@@ -61,6 +61,9 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
   How many are kept: at most 100 logos and 200 covers. Past that, the ones shown longest ago go
   (down to 90 %). A "no logo" or "no cover" is asked again after 30 days. Other limits go in the
   address: `?keeplogos=50&keepcovers=400` (0: keep all).
+* **Music from the network** (the Android app, `?tv=1`): *Choose a music folder* offers a media server, a
+  Windows or NAS share (those two through the app), PicoAmp for Windows' Music folder (its MSX link's
+  port) and, in the app, the music on the TV itself; the songs are streamed from there.
 * **Pictures (I):** pick a folder of pictures (Chrome and Edge remember it, as the music folder); its
   folders and pictures (anything the browser shows: JPEG, PNG, GIF, WebP, AVIF ...).
   * Enter shows one in MSX SCREEN 8 (256 × 192, 256 colours, fitted with the MSX's dot shape and
