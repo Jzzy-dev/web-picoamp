@@ -75,6 +75,11 @@ or Safari, on a PC, a Mac, a Chromebook, Linux or a tablet.
 * **Clock (C)** with sleep timer and alarm, and **Weather (W)** for the place of your internet connection
   ([GeoJS](https://www.geojs.io)) or a place found by name, from [Open-Meteo](https://open-meteo.com).
   * The alarm and sleep timer only work while the page is open (in a background tab is fine).
+* **Lyrics (L)**, as in PicoAmp for Windows: the words of what plays, from [LRCLIB](https://lrclib.net) (free,
+  no account): synced for many songs (the line sung now in the middle; Enter: that line is now, [ ]
+  half a second either way, Up/Down scroll, R looks again), else plain. A file's by its artist, title,
+  album and length; a station's song by its artist and title. Straight from LRCLIB, else through
+  [the relay](#the-relay). Kept in memory while the page is open.
 * **Markets ($)** and **News (T)**, as in PicoAmp for Windows: the market monitor (indices, currencies,
   commodities, crypto and My list from Yahoo Finance, delayed; a chart per instrument; its headlines)
   and the news reader (feeds by topic, My feeds, the full story). Both need [the relay](#the-relay):

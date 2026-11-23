@@ -74,7 +74,7 @@ function writeOut(s, out, max) {
 
 // ---------------- WASI: the little the C library asks for ----------------
 // the environment: the services' addresses for the tests (?rb=...&meteo=...)
-const envMap = { rb: 'PICOAMP_RB', meteo: 'PICOAMP_METEO', geo: 'PICOAMP_GEO', ipapi: 'PICOAMP_IPAPI' };
+const envMap = { rb: 'PICOAMP_RB', meteo: 'PICOAMP_METEO', geo: 'PICOAMP_GEO', ipapi: 'PICOAMP_IPAPI', lrclib: 'PICOAMP_LRCLIB' };
 const env = [];
 for (const [k, v] of Object.entries(envMap)) if (params.get(k)) env.push(`${v}=${params.get(k)}`);
 if (bridge) env.push(`PICOAMP_BRIDGE=${bridge}`);
@@ -691,9 +691,13 @@ function js_fetch(id, p, n) {
         }
         url = relayed(url.slice(6));
     }
+    // "cors:": straight to the site; when the browser may not read it (no answer), through the relay
+    let viaRelay = null;
+    if (url.startsWith('cors:')) { url = url.slice(5); if (relay) viaRelay = relayed(url); }
     const opt = { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined };
     if (isLocal(url) && location.protocol === 'https:') opt.targetAddressSpace = /^http:\/\/(localhost|127\.)/i.test(url) ? 'loopback' : 'local';
-    fetch(url, opt).then(async r => {
+    const opt2 = () => ({ cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined });
+    fetch(url, opt).catch(e => { if (viaRelay && !(e && e.name === 'TimeoutError')) return fetch(viaRelay, opt2()); throw e; }).then(async r => {
         const b = new Uint8Array(await r.arrayBuffer());
         return [r.status, b, ''];
     }).catch(e => [0, new Uint8Array(0), navigator.onLine === false ? 'No internet connection' : e && e.name === 'TimeoutError' ? 'No answer in 20 seconds' : 'No answer (blocked or offline)'])
@@ -1424,7 +1428,8 @@ const goto = place => () => { tvPlayer(); withStr(place, p => X.web_goto(p)); tv
 const TV_ITEMS = [
     ['Internet radio', goto('radio:')], ['Sonos', goto('sonos:')], ['Search stations', () => { tvPlayer(); tvSearch(); tvZone = 'list'; tvIn = true; }],
     ['Clock', () => X.web_key(ch('C'))], ['Weather', () => X.web_key(ch('W'))], ['News', () => X.web_key(ch('T'))],
-    ['Markets', () => X.web_key(ch('$'))], ['Pictures', () => X.web_key(ch('I'))], ['Help: the keys', () => X.web_key(K.F1)],
+    ['Markets', () => X.web_key(ch('$'))], ['Pictures', () => X.web_key(ch('I'))], ['Lyrics', () => X.web_key(ch('L'))],
+    ['Help: the keys', () => X.web_key(K.F1)],
 ];
 const TV_COLS = 3;
 let tvSel = 0;

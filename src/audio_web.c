@@ -184,6 +184,12 @@ static void media_meta(void)
     js_audio_meta(st.title, (int)strlen(st.title), st.artist, (int)strlen(st.artist), st.album, (int)strlen(st.album));
 }
 
+// the time to the ms (the lyrics): a file's from the page's last time, on since then while it
+// plays; a station's song since its title came (the first after tuning in: untimed)
+static double   t_ms;                   // the page's last time, ms
+static uint32_t t_at, title_at;
+static bool     title_any, title_untimed;
+
 static void start_url(const char *url, const char *name)
 {
     st.stream = true;
@@ -194,6 +200,7 @@ static void start_url(const char *url, const char *name)
     st.channels = 2;
     st.tls = !u_strnicmp(url, "https:", 6);
     st.title[0] = st.artist[0] = 0;
+    title_any = title_untimed = false;
     cover_none();
     u_copy(st.album, sizeof st.album, name && *name ? name : url);
     u_copy(st.url, sizeof st.url, url);
@@ -217,6 +224,8 @@ static void start_track(int i)
     }
     const char *f = pl[i];
     st.stream = false;
+    t_ms = 0;
+    t_at = sys_millis();
     st.seekable = true;
     st.tls = false;
     st.state = ST_PLAYING;
@@ -374,11 +383,22 @@ void audio_set_mode(int m)
 }
 void audio_set_eq(const int8_t g[EQ_BANDS]) { js_audio_eq(g[0], g[1], g[2], g[3], g[4]); }
 
+
 void audio_status_get(audio_status *s)
 {
     if (following) sys_poll();
     else sonos_tick();
     *s = st;
+    uint32_t now = sys_millis();
+    if (following) s->elapsed_ms = st.elapsed * 1000;
+    else if (st.stream) s->elapsed_ms = st.state == ST_PLAYING && st.title[0] ? (int)(now - title_at) : 0;
+    else
+    {
+        double e = t_ms + (st.state == ST_PLAYING && !st.buffering ? (double)(now - t_at) : 0);
+        if (st.total > 0 && e > st.total * 1000.0) e = st.total * 1000.0;
+        s->elapsed_ms = (int)e;
+    }
+    s->untimed = st.stream && title_untimed;
 }
 
 // ---------------- what the page tells ----------------
@@ -400,6 +420,8 @@ void web_audio_time(double elapsed, double total)
 {
     if (following) return;                 // (the page's sound is not the room's)
     int e = (int)elapsed, t = total > 0 && isfinite(total) ? (int)(total + 0.5) : 0;
+    t_ms = elapsed * 1000.0;
+    t_at = sys_millis();
     if (e != st.elapsed || t != st.total)
     {
         st.elapsed = e;
@@ -443,6 +465,8 @@ EXPORT(web_audio_title)
 void web_audio_title(const char *t)
 {
     if (following) return;                 // (the page's sound is not the room's)
+    char before[sizeof st.artist + sizeof st.title + 4];
+    snprintf(before, sizeof before, "%s - %s", st.artist, st.title);
     const char *d = strstr(t, " - ");
     if (d && d != t)
     {
@@ -456,6 +480,15 @@ void web_audio_title(const char *t)
     {
         u_copy(st.title, sizeof st.title, t);
         st.artist[0] = 0;
+    }
+    char after[sizeof before];
+    snprintf(after, sizeof after, "%s - %s", st.artist, st.title);
+    if (strcmp(before, after))
+    {
+        // another song: its time from now; the first after tuning in began before (untimed)
+        title_at = sys_millis();
+        title_untimed = !title_any;
+        title_any = true;
     }
     changed();
     media_meta();

@@ -939,7 +939,7 @@ static void draw_help(void)
         { A_NORM, "+ = / - M  vol/mute   H / R  shuffle/rep" },
         { A_NORM, "E          EQ preset  V      scope/cover" },
         { A_NORM, "G          equalizer  Z      full screen" },
-        { A_NORM, "C          clock      W      weather" },
+        { A_NORM, "C / W      clock/wx   L      lyrics" },
         { A_NORM, "T          news       / J    search" },
         { A_NORM, "F          favourite+ D, DEL favourite-" },
         { A_NORM, "I          pictures   Ctrl+Up/Down fav" },
@@ -978,7 +978,7 @@ static void draw_help(void)
 }
 
 // ---------------- pages ----------------
-static const page_t *const pages[PG_COUNT] = { NULL, &page_full, &page_clock, &page_wx, &page_news, &page_pics, &page_markets };
+static const page_t *const pages[PG_COUNT] = { NULL, &page_full, &page_clock, &page_wx, &page_news, &page_pics, &page_markets, &page_lyrics };
 
 int ui_page_now(void) { return page; }
 
@@ -1173,6 +1173,7 @@ void ui_key(int k)
     case 'T': ui_page(PG_NEWS); return;
     case 'I': ui_page(PG_PICS); return;
     case '$': ui_page(PG_MARKETS); return;
+    case 'L': ui_page(PG_LYRICS); return;
     case 'F': fav_add(); return;
     case 'D': case K_DEL: fav_del(); return;
     case K_CTRL_UP: case K_CTRL_DOWN:

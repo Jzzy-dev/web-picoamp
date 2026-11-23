@@ -10,6 +10,7 @@
 #   files                          /music/<name> (the test's music, CORS)
 #   station logos                  /json/stations/byuuid/<uuid>, /json/stations/byurl; /logos/green.png
 #                                  (CORS), /logos/nocors.png (none: through /proxy?url=, as wsrv.nl)
+#   LRCLIB (the lyrics)            /lrclib/api/get, /lrclib/api/search (the search without CORS: through the relay)
 #   the relay                      /relay/?url=: Yahoo Finance (/v8/finance/spark, /rss/2.0/headline), the
 #                                  news (feeds.bbci.co.uk: /feeds/rss.xml; news.example.com/articles/<n>.html)
 #
@@ -37,13 +38,16 @@ sonos = {'RINCON_A': {'state': 'playing', 'title': 'Fake Song', 'artist': 'Fake 
                       'volume': 40, 'muted': False, 'shuffle': False, 'repeat': 0, 'track': 1, 't0': time.time(), 'radio': True}}
 sonos_log = []
 
+LRC = ("[ar:Unit Tester]\n[00:00.50] First line\n[00:02.00] Second line, a rather long one that does not fit on one row of the page at all\n"
+       "[00:04.00][00:12.00] Café line, twice\n[00:06.00]\n[00:08.00] Last line")
+
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
     def reply(self, body, ctype='application/json', cors=True):
         b = body if isinstance(body, bytes) else body.encode()
         self.send_response(200)
-        if cors: self.send_header('Access-Control-Allow-Origin', '*')
+        if cors or getattr(self, 'relaying', False): self.send_header('Access-Control-Allow-Origin', '*')   # (the relay: always)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(b)))
         self.end_headers()
@@ -171,6 +175,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if t.netloc in here: self.path = t.path + ('?' + t.query if t.query else '')
             elif t.netloc == 'feeds.bbci.co.uk': self.path = '/feeds/rss.xml'
             else: self.send_response(404); self.send_header('Access-Control-Allow-Origin', '*'); self.end_headers(); return
+            self.relaying = True
             return self.do_GET()
         elif p == '/v8/finance/spark':                     # Yahoo Finance's chart service (as it answered in November 2026)
             syms = q.get('symbols', '').split(',')
@@ -211,6 +216,19 @@ class H(http.server.BaseHTTPRequestHandler):
             paras = ''.join('<p>Paragraph %d of the article %s. It has a few sentences, enough to fill a line or two of the reader.</p>' % (k, n) for k in range(12))
             self.reply('<html><head><title>x</title><script>var a=1;</script></head><body><nav>Menu Home News</nav>'
                        '<article><h1>Article %s</h1>%s</article><footer>Footer text</footer></body></html>' % (n, paras), 'text/html')
+        elif p == '/lrclib/api/get':                       # LRCLIB (the lyrics): the search without CORS (the relay then)
+            print("lrclib get", q.get('artist_name'), q.get('track_name'), q.get('album_name'), q.get('duration'), flush=True)
+            if q.get('track_name') == 'Sine Café Song' and q.get('duration') == '30':
+                self.reply(json.dumps({"id": 1, "trackName": "Sine Café Song", "artistName": "Unit Tester", "duration": 30,
+                                       "instrumental": False, "plainLyrics": "First line\nSecond line", "syncedLyrics": LRC}))
+            else:
+                self.send_response(404); self.send_header('Content-Type', 'application/json'); self.end_headers()
+                self.wfile.write(b'{"code":404,"name":"TrackNotFound"}')
+        elif p == '/lrclib/api/search':
+            t = q.get('track_name') or q.get('q', '')
+            print("lrclib search", q.get('artist_name'), t, flush=True)
+            self.reply(json.dumps([{"id": 5, "duration": 180, "instrumental": False, "plainLyrics": "A station's song\nla la la", "syncedLyrics": None}]
+                                  if t == 'Sine Cafe Song' else []), cors=False)
         elif p == '/status-json.xsl':
             print("status", flush=True)
             self.reply(json.dumps({"icestats": {"source": [

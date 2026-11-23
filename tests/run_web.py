@@ -81,7 +81,7 @@ log = open(os.path.join(T, 'svc.log'), 'w')
 svc = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tests', 'web_server.py'), str(SVC_PORT), os.path.join(M, '01 Sine.mp3'), M], stdout=log, stderr=log)
 time.sleep(0.6)
 
-URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi&logoproxy=%s/proxy%%3Furl%%3D&itunes=%s/itunes&npproxy=&relay=off' % (PAGE_PORT, SVC, SVC, SVC, SVC, SVC, SVC)
+URL = 'http://127.0.0.1:%d/?rb=%s&meteo=%s/meteo&geo=%s/geo&ipapi=%s/ipapi&logoproxy=%s/proxy%%3Furl%%3D&itunes=%s/itunes&npproxy=&relay=off&lrclib=%s/lrclib' % (PAGE_PORT, SVC, SVC, SVC, SVC, SVC, SVC, SVC)
 URL_RELAY = URL.replace('relay=off', 'relay=%s/relay/' % SVC)   # (the fake relay; else none, not the real default)
 fails = 0
 def check(name, out, pattern):
@@ -106,8 +106,8 @@ try:
       page.on('pageerror', lambda e: errors.append(str(e)))
       page.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
 
-      def load(ini_changes=None, lists=None):
-          page.goto(URL)
+      def load(ini_changes=None, lists=None, url=None):
+          page.goto(url or URL)
           page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
           if ini_changes or lists:
               page.evaluate('picoamp.save(); picoamp.stopSaving()')
@@ -117,7 +117,7 @@ try:
               page.evaluate('([a, b]) => picoamp.fs.set(a, b)', ['/PicoAmp/picoamp.ini', ini])
               for name, text in (lists or {}).items():
                   page.evaluate('([a, b]) => picoamp.fs.set(a, b)', ['/PicoAmp/Radio/' + name, text])
-              page.goto(URL)
+              page.goto(url or URL)
               page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
       def run(script):
           return page.evaluate('t => picoamp.script(t)', script)
@@ -188,6 +188,13 @@ try:
       # a file without a picture: a default one, then its cover online (iTunes, by artist and title)
       out = run('key Home; key Down; key Down; key Enter; wait 500; key V; key V; wait 2000; page')
       check('cover: no picture: a default one, then online', out, r'page 0 cover=ready')
+      # the lyrics (L): LRCLIB (here a stand-in) by artist, title, album and length: synced, the line sung now
+      out = run('key L; wait 1500; page')
+      shot('lyrics')
+      check('lyrics: a file\'s, synced', out, r"lyrics state=synced lines=6 at=\d line=")
+      check('lyrics: asked by its length', open(os.path.join(T, 'svc.log')).read(), r'lrclib get Unit Tester Sine Caf. Song (None )?30')
+      out = run('key Esc; key L; wait 200; page; key Esc')
+      check('lyrics: kept (at once)', out, r"lyrics state=synced lines=6")
       run('wait 2500')
       check('cover: iTunes asked (artist and title)', open(os.path.join(T, 'svc.log')).read(), r'itunes Unit Tester Sine Caf')
       px = page.evaluate('picoamp.pixel(48, 88)')
@@ -435,6 +442,12 @@ try:
       shot('news')
       check('news: a feed (the relay)', out, r"news headlines feed='Test News' state=2 stories=30")
       check('news: the full article (the story\'s page)', out, r'news story .*article=2 lines=3\d[\s\S]*Paragraph 1 of the article 24')
+      # a station's song's lyrics: LRCLIB's search, here without CORS: through the relay
+      load({'folder': 'radio:'}, url=URL_RELAY)
+      run('key Home; key Down; key Down; key Enter; wait 500; key Down; key Down; key Enter; wait 3000')
+      out = run('key L; wait 2000; page; key Esc')
+      check('lyrics: a station\'s song (the search, through the relay)', out, r"lyrics state=plain lines=2")
+      check('lyrics: the relay asked', open(os.path.join(T, 'svc.log')).read(), r'relay http://127\.0\.0\.1:\d+/lrclib/api/search\?track_name=Sine')
       check('relay: asked for Yahoo and the feed', open(os.path.join(T, 'svc.log')).read(), r'relay https://query1\.finance\.yahoo\.com/v8/finance/spark\?symbols=[\s\S]*relay https://feeds\.bbci\.co\.uk/news/rss\.xml')
       page.goto(URL)
       page.wait_for_function('window.picoamp && document.body.classList.contains("ready")')
