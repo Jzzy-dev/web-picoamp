@@ -183,11 +183,7 @@ static void row0(void)
     tx(0, 2, shown, C_TEXT, -1, room);
     time_t now = time(NULL);
     struct tm tm;
-#ifdef _WIN32
-    localtime_s(&tm, &now);
-#else
-    localtime_r(&now, &tm);
-#endif
+    sys_localtime(now, &tm);
     static const char *const wd[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
     static const char *const mo[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
     char t[40];

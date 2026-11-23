@@ -288,13 +288,8 @@ void nf_fmt_date(const nf_item *it, char *o, size_t n, bool lng)
     }
     time_t tt = (time_t)it->t, now = time(NULL);
     struct tm a, b;
-#ifdef _WIN32
-    localtime_s(&a, &tt);
-    localtime_s(&b, &now);
-#else
-    localtime_r(&tt, &a);
-    localtime_r(&now, &b);
-#endif
+    sys_localtime(tt, &a);
+    sys_localtime(now, &b);
     int wd = (a.tm_wday + 6) % 7;
     if (lng) snprintf(o, n, "%.3s %d %.3s %d %02d:%02d", wdays + wd * 3, a.tm_mday, mons + a.tm_mon * 3, a.tm_year + 1900, a.tm_hour, a.tm_min);
     else if (a.tm_year == b.tm_year && a.tm_yday == b.tm_yday) snprintf(o, n, "%02d:%02d", a.tm_hour, a.tm_min);

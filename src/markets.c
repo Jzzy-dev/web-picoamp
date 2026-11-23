@@ -94,11 +94,7 @@ static void row0(void)
     tx(0, 2, ui_now_playing(), C_TEXT, 58);
     time_t now = time(NULL);
     struct tm tm;
-#ifdef _WIN32
-    localtime_s(&tm, &now);
-#else
-    localtime_r(&now, &tm);
-#endif
+    sys_localtime(now, &tm);
     static const char *const wd[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
     static const char *const mo[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
     char t[40];
@@ -117,11 +113,7 @@ static struct tm local_tm(int64_t t)
 {
     time_t tt = (time_t)t;
     struct tm tm;
-#ifdef _WIN32
-    localtime_s(&tm, &tt);
-#else
-    localtime_r(&tt, &tm);
-#endif
+    sys_localtime(tt, &tm);
     return tm;
 }
 
