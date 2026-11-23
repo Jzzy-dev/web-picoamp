@@ -181,8 +181,8 @@ static void draw_cover_big(void)
     gfx_s8_on = true;
 }
 
-// the cover big shows (for drawing it sharp: ui_sharp_cover)
-bool fs_is_cover(void) { return fs_mode == FS_COVER && big_ok; }
+// the cover big is the mode (the TV's remote; for drawing it sharp: ui_sharp_cover)
+bool fs_is_cover(void) { return fs_mode == FS_COVER; }
 
 static void fs_set(int m)
 {
@@ -231,5 +231,8 @@ static void fs_mouse(int x, int y, int b)
     if (b == MOUSE_LEFT) fs_set(fs_mode + 1);
     else if (b == MOUSE_RIGHT) ui_page(PG_PLAYER);
 }
+
+// the TV's remote: OK on the cover view opens the big cover at once
+void fs_cover(void) { fs_set(FS_COVER); }
 
 const page_t page_full = { fs_open, fs_frame, fs_key, fs_mouse, fs_close, NULL };

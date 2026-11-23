@@ -278,15 +278,138 @@ function js_music_list(id, p, n) {
 function js_music_name(out, max) { return music ? writeOut(music.name, out, max) : 0; }
 
 // ---------------- the pictures' folder (I), picked apart from the music's ----------------
-let pics = null;               // { name, handle } or { name, tree }
+let pics = null;               // { name, handle }, { name, tree } or { name, net: { base, q } } (from the network)
 let picsPick = null;
 async function restorePics() {
+    try {
+        const n = JSON.parse(localStorage.getItem('picoamp-pics-net') || 'null');
+        if (n && n.net) { pics = n; return; }
+    } catch { }
     try {
         const h = await idbGet('pictures');
         if (h && h.kind === 'directory') pics = { name: h.name, handle: h };
     } catch { }
 }
+// ---- pictures from the network: a Windows or NAS share, a media server (the Android app does those
+// two: /net/ there) and PicoAmp for Windows (its MSX link's port: /pics/)
+const hasNet = () => !!(window.PicoAmpAndroid && window.PicoAmpAndroid.getVolume) || params.get('netpics') === '1';
+function netSources() { try { return JSON.parse(localStorage.getItem('picoamp-pics-sources') || '[]'); } catch { return []; } }
+function setNetSources(a) { try { localStorage.setItem('picoamp-pics-sources', JSON.stringify(a.slice(0, 12))); } catch { } }
+function netOf(src) {
+    if (src.kind === 'win') return { base: `http://${src.host}/pics/`, q: '' };
+    return { base: (params.get('netbase') || '/net/'), q: 'src=' + encodeURIComponent(src.src) + '&' };
+}
+async function netFetch(net, what, path) {
+    const r = await fetch(`${net.base}${what}?${net.q}path=${encodeURIComponent(path)}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error((await r.text().catch(() => '')).trim().slice(0, 80) || `The network folder said ${r.status}`);
+    return r;
+}
+function useNet(src) {
+    pics = { name: src.label, net: netOf(src) };
+    try { localStorage.setItem('picoamp-pics-net', JSON.stringify(pics)); } catch { }
+    setNetSources([src, ...netSources().filter(o => o.label !== src.label)]);
+    return true;
+}
+function smbSource() {
+    const where = prompt('The share: \\\\PC\\Pictures or \\\\NAS\\photo\\Holidays (a folder in it too)');
+    if (!where || !where.trim()) return null;
+    const parts = where.trim().replace(/^smb:\/\//i, '').replace(/\//g, '\\').replace(/^\\+/, '').split('\\').filter(Boolean);
+    if (parts.length < 2) { alert('A share is \\\\PC\\share: the PC (or NAS) and the share'); return null; }
+    const user = prompt('The user name (DOMAIN\\user; empty: as a guest)', '') ?? '';
+    const pass = user ? (prompt('The password', '') ?? '') : '';
+    const cred = user ? encodeURIComponent(user) + (pass ? ':' + encodeURIComponent(pass) : '') + '@' : '';
+    return { kind: 'smb', label: '\\\\' + parts.join('\\'), src: `smb://${cred}${parts[0]}/${parts.slice(1).map(encodeURIComponent).join('/')}` };
+}
+function winSource() {
+    let h = prompt('The PC with PicoAmp for Windows: its address (and the MSX link\'s port, 8765 if not said), e.g. 192.168.1.20', '');
+    if (!h || !h.trim()) return null;
+    h = h.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    if (!/:\d+$/.test(h)) h += ':8765';
+    return { kind: 'win', label: 'PicoAmp for Windows on ' + h, host: h };
+}
+// the choice: a list over the page (the remote's arrows and OK, or clicks); resolves true when chosen
+let netPick = null;               // { el, items: [[label, act, saved]], i, done }
+function netPickShow() {
+    if (!netPick) return;
+    const list = netPick.el.querySelector('.items');
+    list.replaceChildren(...netPick.items.map(([label], i) => {
+        const d = document.createElement('div');
+        d.textContent = label;
+        if (i === netPick.i) d.className = 'on';
+        d.onclick = () => { netPick.i = i; netPickAct('ok'); };
+        return d;
+    }));
+    list.children[netPick.i]?.scrollIntoView({ block: 'nearest' });
+}
+function netPickClose(ok) {
+    if (!netPick) return;
+    const p = netPick;
+    netPick = null;
+    p.el.remove();
+    p.done(ok);
+}
+function netPickAct(a) {
+    const p = netPick, n = p.items.length;
+    if (a === 'up' || a === 'left') p.i = (p.i + n - 1) % n;
+    else if (a === 'down' || a === 'right') p.i = (p.i + 1) % n;
+    else if (a === 'back' || a === 'menu') { netPickClose(false); return; }
+    else if (a === 'ok') {
+        const r = p.items[p.i][1]();
+        if (r && r.then) r.then(ok => { if (ok) netPickClose(true); });
+        else if (r) netPickClose(true);
+        return;
+    }
+    else if (a === 'longok' && p.items[p.i][2]) {
+        // a remembered one: forgotten
+        const lab = p.items[p.i][0].replace(/^\u2605 /, '');
+        setNetSources(netSources().filter(o => o.label !== lab));
+        p.items.splice(p.i, 1);
+        p.i = Math.min(p.i, p.items.length - 1);
+    }
+    netPickShow();
+}
+function netPickOpen() {
+    return new Promise(done => {
+        const el = document.createElement('div');
+        el.id = 'netpick';
+        el.setAttribute('role', 'menu');
+        el.innerHTML = '<h2>Pictures from</h2><div class="items"></div><p>OK: choose &middot; OK held: forget a remembered one &middot; Back: close</p>';
+        document.body.append(el);
+        const local = () => {
+            // (the folder picker's answer is the choice's)
+            const p = netPick;
+            netPick = null;
+            p.el.remove();
+            const forgetNet = () => { try { localStorage.removeItem('picoamp-pics-net'); } catch { } };
+            (window.showDirectoryPicker
+                ? window.showDirectoryPicker({ id: 'picoamp-pictures', mode: 'read', startIn: 'pictures' })
+                    .then(async h => { pics = { name: h.name, handle: h }; forgetNet(); await idbSet('pictures', h).catch(() => { }); return true; })
+                    .catch(() => false)
+                : pickWithInput('Pictures').then(root => { if (root) { pics = root; forgetNet(); } return !!root; })).then(done);
+            return false;
+        };
+        const items = [];
+        for (const s of netSources()) if (s.kind !== 'smb' || hasNet()) items.push(['\u2605 ' + s.label, () => useNet(s), true]);
+        const at = items.length;
+        if (hasNet()) items.push(['A Windows or NAS share\u2026', () => { const s = smbSource(); return s ? useNet(s) : false; }]);
+        items.push(['PicoAmp for Windows (its pictures)\u2026', () => { const s = winSource(); return s ? useNet(s) : false; }]);
+        if (!tvMode) items.push(['A folder on this device\u2026', local]);
+        if (hasNet()) items.push(['(looking for media servers\u2026)', () => false]);
+        netPick = { el, items, i: 0, done };
+        netPickShow();
+        if (hasNet()) fetch(`${params.get('netbase') || '/net/'}servers`).then(r => r.json()).catch(() => []).then(list => {
+            if (!netPick || netPick.el !== el) return;
+            const k = items.findIndex(it => it[0].startsWith('(looking'));
+            const found = (list || []).filter(sv => !netSources().some(o => o.src === sv.src))
+                .map(sv => ['Media server: ' + sv.name, () => useNet({ kind: 'dlna', label: 'Media server ' + sv.name, src: sv.src })]);
+            items.splice(k, 1, ...(found.length ? found : [['(no media servers found)', () => false]]));
+            items.splice(at, 0, ...items.splice(items.length - (found.length || 1)));     // (the servers after the remembered ones)
+            netPickShow();
+        });
+    });
+}
 function js_pics_pick() {
+    if (tvMode || hasNet()) { picsPick = netPickOpen(); return; }
     if (window.showDirectoryPicker) {
         picsPick = window.showDirectoryPicker({ id: 'picoamp-pictures', mode: 'read', startIn: 'pictures' })
             .then(async h => { pics = { name: h.name, handle: h }; await idbSet('pictures', h).catch(() => { }); return true; })
@@ -298,7 +421,8 @@ function js_pics_list(id, p, n) {
     const pick = picsPick;
     (async () => {
         if (pick) { const ok = await pick; if (picsPick === pick) picsPick = null; if (!ok && !pics) throw new Error('No folder chosen'); }
-        const items = await (await rootDir(pics, path, 'pictures')).list();
+        const items = pics && pics.net ? (await (await netFetch(pics.net, 'list', path)).text()).split('\n').filter(l => /^[df] ./.test(l)).map(l => [l[0], l.slice(2)])
+                                       : await (await rootDir(pics, path, 'pictures')).list();
         return items.filter(([, nm]) => !nm.startsWith('.')).map(([k, nm]) => `${k} ${nm}`).join('\n');
     })().then(text => withStr(text, p2 => X.dir_done(id, p2, 1)),
               e => withStr(String(e.message || e), p2 => X.dir_done(id, p2, 0)));
@@ -308,6 +432,7 @@ async function picsFile(path) {
     const parts = path.split('/');
     const name = parts.pop();
     if (!pics) throw new Error('No pictures folder');
+    if (pics.net) return (await netFetch(pics.net, 'file', path)).blob();
     if (pics.tree) {
         let d = pics.tree;
         for (const p of parts) d = d && d.children.get(p);
@@ -591,12 +716,22 @@ let gen = 0;
 let gainL = 1, gainR = 1;
 let eqGains = [0, 0, 0, 0, 0];
 let lastT = 0;
+// light sound (the TV's remote: Up at the top, Sound): stations as they are, without Web Audio (no
+// spectrum, no equalizer), for a TV too slow for it
+let lightSound = false;
+try { lightSound = localStorage.getItem('picoamp-light') === '1'; } catch (e) { }
+function setLightSound(on) {
+    lightSound = on;
+    try { localStorage.setItem('picoamp-light', on ? '1' : '0'); } catch (e) { }
+    note(on ? 'Light sound: stations without the spectrum and equalizer (from the next one)' : 'Full sound: the spectrum and equalizer (from the next station)');
+}
 
 function ensureCtx() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    ctx = new AC();
+    // (the TV: larger buffers, the sound before the speed of the knobs: a slow TV's CPU otherwise crackles)
+    ctx = new AC(tvMode ? { latencyHint: 'playback' } : undefined);
     const src = ctx.createMediaElementSource(el);
     const pre = ctx.createGain();
     const bands = [['lowshelf', 120], ['peaking', 250], ['peaking', 1000], ['peaking', 4000], ['highshelf', 7200]]
@@ -889,6 +1024,13 @@ function js_audio_play(p, n, isFile) {
     let url = src;
     if (location.protocol === 'https:' && /^http:/i.test(url)) cur.insecure = true;
     if (!cur.insecure) npStart(url);
+    if (lightSound) {
+        cur.usingPlain = true;
+        plain.src = url;
+        applyGain();
+        plain.play().catch(e => { if (g === gen && e.name !== 'AbortError') failStream(); });
+        return;
+    }
     el.src = url;
     el.play().catch(e => { if (g === gen && e.name === 'NotAllowedError') cErr(playError(e)); });
 }
@@ -1013,6 +1155,29 @@ function computeDest(cw, ch, scale) {
     dest = { x: Math.floor((cw - dw) / 2), y: Math.floor((ch - dh) / 2), w: Math.max(1, dw), h: Math.max(1, dh) };
 }
 
+// ---------------- the device's volume (the Android app) ----------------
+// the sound at full here, the device's (the TV's) volume is the volume: shown, and set from here
+const dev = window.PicoAmpAndroid && window.PicoAmpAndroid.getVolume ? window.PicoAmpAndroid : null;
+let devVol = -1, devFixed = false;
+function systemVolume(v) {
+    if (!X || !dev) return;
+    devVol = devFixed ? 100 : Math.round(v);
+    X.web_ext_volume_is(devVol);
+}
+function deviceVolume() {
+    if (!dev) return;
+    if (devVol < 0) {
+        devFixed = !!dev.volumeFixed();
+        X.web_ext_volume(1);
+        systemVolume(dev.getVolume());
+        return;
+    }
+    const v = X.web_own_volume();
+    if (v === devVol) return;
+    if (devFixed) { dev.volumeStep(v > devVol ? 1 : -1); X.web_ext_volume_is(100); }   // (the TV's own, by HDMI-CEC: up or down)
+    else { devVol = v; dev.setVolume(v); }
+}
+
 function draw() {
     const w = X.web_width(), h = X.web_height();
     if (!img || img.width !== w || img.height !== h) {
@@ -1044,6 +1209,8 @@ function draw() {
     g2.imageSmoothingQuality = 'high';
     g2.drawImage(big, dest.x, dest.y, dest.w, dest.h);
     sharpCover(g2, dest);
+    deviceVolume();
+    tvFrame(g2, dest);
 }
 
 // ---------------- the cover, sharp (F5) ----------------
@@ -1223,8 +1390,407 @@ document.getElementById('lists-export').onclick = () => {
 document.getElementById('lists-close').onclick = () => dlg.close();
 dlg.addEventListener('close', () => { saveCurrent(); X.web_reload(); save(); canvas.focus(); });
 
+// ---------------- the TV (the Android app, or ?tv=1): its remote ----------------
+// The remote has the arrows, OK, Back, and sometimes play/pause and the like. On the player, a
+// white frame shows the part of the screen the arrows are in: Up/Down move it between the remote's
+// own row (Menu, Help, Sound full/light, Exit), the seek bar, the picture (spectrum, scope, cover),
+// the list and the control row; OK goes into that part:
+//   the seek bar  Left/Right: 10 s back / on (at once; a track, not a station)
+//   the picture   Left/Right: spectrum, scope, cover; OK on the cover: the cover big (full screen)
+//   the list      the arrows and OK as ever; Back: the folder up, at the top out of the list;
+//                 OK held: the station into the favourites (in the favourites: out of them)
+//   the controls  Left/Right choose (previous, 10 s back, play, pause, stop, 10 s on, next, shuffle,
+//                 repeat, EQ, volume), OK does it; on EQ the arrows set the equalizer, on the volume
+//                 Left/Right set it (in the app: the TV's own volume)
+// Back comes out again (and at the top leaves the app: 'exit'). OK held elsewhere (or the menu key)
+// opens the menu: the list's places and the other pages. The other pages: a key row chosen word by
+// word (Left/Right, OK) under the clock (Down), the markets (Left held; the chart: Down held twice)
+// and the news (Down held); the markets' table: Right held its members, Up held now, Down held the
+// order; the news' My feeds: OK held on the right a feed in, on the left out. The app calls
+// picoamp.tvKey(phase, key) for the arrows and OK (a key held is its long one) and picoamp.tv(action)
+// for the rest; a keyboard here (?tv=1): the arrows and Enter (held), Escape is Back.
+const tvMode = params.get('tv') === '1';
+const tvMenu = document.getElementById('tvmenu'), tvGrid = document.getElementById('tvgrid');
+const ch = c => c.charCodeAt(0);
+function tvSearch() {
+    const t = (prompt('Search the station directory') || '').trim();
+    if (!t) return;
+    X.web_key(ch('/'));
+    for (const c of t) if (c.charCodeAt(0) >= 32 && c.charCodeAt(0) < 127) X.web_key(c.charCodeAt(0));
+    X.web_key(K.ENTER);
+}
+function tvPlayer() { for (let i = 0; i < 4 && X.web_back_level() === 0; i++) X.web_key(K.ESC); }
+const goto = place => () => { tvPlayer(); withStr(place, p => X.web_goto(p)); tvZone = 'list'; tvIn = true; };
+const TV_ITEMS = [
+    ['Internet radio', goto('radio:')], ['Sonos', goto('sonos:')], ['Search stations', () => { tvPlayer(); tvSearch(); tvZone = 'list'; tvIn = true; }],
+    ['Clock', () => X.web_key(ch('C'))], ['Weather', () => X.web_key(ch('W'))], ['News', () => X.web_key(ch('T'))],
+    ['Markets', () => X.web_key(ch('$'))], ['Pictures', () => X.web_key(ch('I'))], ['Help: the keys', () => X.web_key(K.F1)],
+];
+const TV_COLS = 3;
+let tvSel = 0;
+for (const [name] of TV_ITEMS) { const d = document.createElement('div'); d.textContent = name; tvGrid.appendChild(d); }
+function tvShow() { [...tvGrid.children].forEach((d, i) => d.classList.toggle('on', i === tvSel)); }
+function tvOpen(on) { tvMenu.hidden = !on; if (on) tvShow(); }
+
+// the player's parts (MSX pixels) and the control row's cells (from the mouse's: ui.c)
+//   top    the remote's own: Menu, Help, Sound (full / light), Exit   (Left/Right choose, OK)
+//   seek   the seek bar: Left/Right 10 s back / on (a track, not a station)
+//   pic    the picture   list   the list   ctl   the control row
+const PG = { PLAYER: 0, FULL: 1, CLOCK: 2, WX: 3, NEWS: 4, PICS: 5, MARKETS: 6 };
+const TV_ZONES = { top: [0, 0, 256, 16], seek: [4, 31, 248, 10], pic: [0, 40, 256, 96], list: [0, 144, 256, 40], ctl: [0, 184, 256, 8] };
+const TV_ORDER = ['top', 'seek', 'pic', 'list', 'ctl'];
+const TV_CTL = [['prev', 1, 1], ['back10', 2, 2], ['play', 3, 3], ['pause', 4, 4], ['stop', 5, 5], ['on10', 6, 6], ['next', 7, 7],
+                ['shuffle', 9, 11], ['repeat', 13, 15], ['eq', 17, 18], ['volume', 20, 31]];
+const TV_TOP = ['Menu', 'Help', 'Sound', 'Exit'];
+let tvZone = 'list', tvIn = false, tvCtl = 2, tvVol = false, tvAt = 0, tvTop = 0;
+let tvBar = null;                 // a page's key rows, chosen one by one: { page, items: [[label, act, x, y, w, h]], i }
+let tvHeads = false;              // the markets' chart: its headlines framed
+function tvClick(col) { X.web_mouse(col * 8 + 3, 23 * 8 + 3, 1); X.web_mouse(col * 8 + 3, 23 * 8 + 3, 7); }
+function cstr(p) { if (!p) return ''; const b = new Uint8Array(mem.buffer, p); let n = 0; while (b[n]) n++; return new TextDecoder().decode(b.subarray(0, n)); }
+const describe = () => cstr(X.web_describe());
+const field = (d, k) => { const m = d.match(new RegExp('\\b' + k + '=(-?\\d+)')); return m ? +m[1] : null; };
+const note = t => withStr(t, p => X.web_message(p, 0));
+const keys = s => { for (const c of s) if (c.charCodeAt(0) >= 32 && c.charCodeAt(0) < 127) X.web_key(c.charCodeAt(0)); };
+// a key that types text: the TV's on-screen keyboard (prompt()), then the text and Enter; nothing when cancelled
+const typed = (key, question, then) => () => {
+    const t = prompt(question);
+    if (t === null) return;
+    X.web_key(typeof key === 'number' ? key : ch(key));
+    keys(t.trim());
+    X.web_key(K.ENTER);
+    if (then) then();
+};
+const sendKey = k => () => X.web_key(typeof k === 'number' ? k : ch(k));
+
+// ---- the pages' key rows (where each key's words are: the frame goes around them)
+// (the 512-pixel pages: 6-pixel letters from x 16; the clock's: from x 0)
+function at6(x0, row, text, label, act) {
+    const i = text.indexOf(label);
+    return [label, act, x0 + 6 * Math.max(0, i), row * 8, 6 * label.length, 8];
+}
+const MK25 = ' 1 Europe  2 Americas  3 Asia-Pacific   C clock  W weather  T news  $/ESC player';
+const MK24 = ' </> list  Up/Down choose  Enter chart  I members (BS back)  O order  U now';
+const NW25 = ' C clock   W weather   T the player   I info';
+const NW24 = {
+    feeds: ' Left/Right side  Enter read/add  D remove  U/J move  A address  BS back  ESC headlines',
+    headlines: ' Enter read  Up/Down choose  Left/Right page  1-9 a feed  F My feeds  S sort',
+    story: ' Up/Down scroll  Left/Right page  Enter full article/summary  N/P next/prev  ESC',
+    info: ' ESC, Enter or BS: back',
+};
+const CK23 = '</> face I time L place O sleep A alarm';
+function barItems(pg, d) {
+    if (pg === PG.MARKETS) {
+        const chart = /markets chart/.test(d);
+        const lr = chart ? [['<', sendKey(K.LEFT), 16 + 6 * 18, 192, 18, 8], ['>', sendKey(K.RIGHT), 16 + 6 * 46, 192, 18, 8]]
+                         : [at6(16, 24, MK24, '<', sendKey(K.LEFT)), at6(16, 24, MK24, '>', sendKey(K.RIGHT))];
+        return [...lr, at6(16, 25, MK25, '1 Europe', sendKey('1')), at6(16, 25, MK25, '2 Americas', sendKey('2')),
+                at6(16, 25, MK25, '3 Asia-Pacific', sendKey('3')), at6(16, 25, MK25, 'C clock', sendKey('C')),
+                at6(16, 25, MK25, 'W weather', sendKey('W')), at6(16, 25, MK25, 'T news', sendKey('T')),
+                at6(16, 25, MK25, '$/ESC player', sendKey('$'))];
+    }
+    if (pg === PG.NEWS) {
+        const view = (d.match(/news (\w+)/) || [])[1] || 'headlines', r = NW24[view] || NW24.headlines;
+        const side = field(d, 'side');
+        let it;
+        if (view === 'feeds') it = [
+            at6(16, 24, r, 'Left', sendKey(K.LEFT)), at6(16, 24, r, 'Right', sendKey(K.RIGHT)),
+            at6(16, 24, r, 'read', () => { if (field(describe(), 'side') === 1) X.web_key(K.LEFT); X.web_key(K.ENTER); }),
+            at6(16, 24, r, 'add', () => { if (field(describe(), 'side') === 0) X.web_key(K.RIGHT); X.web_key(K.ENTER); }),
+            at6(16, 24, r, 'D remove', sendKey('D')), at6(16, 24, r, 'U', sendKey('U')), at6(16, 24, r, 'J', sendKey('J')),
+            at6(16, 24, r, 'A address', typed('A', 'A feed\'s address (RSS or Atom)')),
+            at6(16, 24, r, 'BS back', sendKey(K.BS)), at6(16, 24, r, 'ESC headlines', sendKey(K.ESC))];
+        else if (view === 'headlines') it = [
+            at6(16, 24, r, 'Left', sendKey(K.LEFT)), at6(16, 24, r, 'Right', sendKey(K.RIGHT)),
+            at6(16, 24, r, 'Enter read', sendKey(K.ENTER)), at6(16, 24, r, 'F My feeds', sendKey('F')),
+            at6(16, 24, r, 'S sort', sendKey('S'))];
+        else if (view === 'story') it = [
+            at6(16, 24, r, 'Left', sendKey(K.LEFT)), at6(16, 24, r, 'Right', sendKey(K.RIGHT)),
+            at6(16, 24, r, 'Enter full', sendKey(K.ENTER)), at6(16, 24, r, 'N', sendKey('N')), at6(16, 24, r, 'P', sendKey('P')),
+            at6(16, 24, r, 'ESC', sendKey(K.ESC))];
+        else it = [at6(16, 24, r, 'ESC', sendKey(K.ESC))];
+        void side;
+        return [...it, at6(16, 25, NW25, 'C clock', sendKey('C')), at6(16, 25, NW25, 'W weather', sendKey('W')),
+                at6(16, 25, NW25, 'T the player', sendKey('T')), at6(16, 25, NW25, 'I info', sendKey('I'))];
+    }
+    if (pg === PG.CLOCK) return [
+        at6(0, 23, CK23, '<', sendKey(K.LEFT)), at6(0, 23, CK23, '>', sendKey(K.RIGHT)), at6(0, 23, CK23, 'I time', sendKey('I')),
+        at6(0, 23, CK23, 'L place', typed('L', 'The place (empty: found by the internet address)', () => { tvBar = null; })),
+        at6(0, 23, CK23, 'O sleep', sendKey('O')),
+        at6(0, 23, CK23, 'A alarm', typed('A', 'The alarm at (e.g. 7:30; w 7:30: Mo-Fr; empty: off)'))];
+    return null;
+}
+function openBar(pg, d, at) {
+    const items = barItems(pg, d);
+    if (items) tvBar = { page: pg, items, i: Math.min(at || 0, items.length - 1) };
+}
+
+// ---- the frame: drawn over the picture (draw()), for a few seconds after a key, and while a part is chosen
+function tvFrame(g, d) {
+    if (!tvMode || !X || !tvMenu.hidden) return;
+    const st = X.web_tv_state(), pg = st & 15;
+    const W = X.web_width(), H = X.web_height(), kx = d.w / W, ky = d.h / H, lw = Math.max(2, Math.round(kx * 0.75));
+    const box = (r, col) => {
+        g.save();
+        g.strokeStyle = col;
+        g.lineWidth = lw;
+        g.strokeRect(d.x + r[0] * kx - lw / 2, d.y + r[1] * ky - lw / 2, r[2] * kx + lw, r[3] * ky + lw);
+        g.restore();
+    };
+    if (tvBar && tvBar.page === pg) { const it = tvBar.items[tvBar.i]; box(it.slice(2), '#ffffff'); return; }
+    if (tvHeads && pg === PG.MARKETS) { box([16, 160, 480, 32], '#ffffff'); return; }
+    if (pg !== PG.PLAYER || (st & 0x600)) return;
+    const recent = performance.now() - tvAt < 6000;
+    if (tvZone === 'top') {
+        // the remote's own row, over the player's top
+        const h = 14 * ky, y = d.y + 1 * ky, w = d.w / TV_TOP.length;
+        g.save();
+        g.fillStyle = 'rgba(0,0,40,0.92)';
+        g.fillRect(d.x, d.y, d.w, 16 * ky);
+        g.font = `${Math.round(8 * ky)}px sans-serif`;
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        const names = TV_TOP.map(n => n === 'Sound' ? (lightSound ? 'Sound: light' : 'Sound: full') : n);
+        names.forEach((n, i) => {
+            g.fillStyle = i === tvTop ? '#ffff24' : '#ffffff';
+            g.fillText(n, d.x + w * (i + 0.5), y + h / 2);
+        });
+        g.strokeStyle = '#ffffff';
+        g.lineWidth = lw;
+        g.strokeRect(d.x + w * tvTop + 4 * kx, y, w - 8 * kx, h);
+        g.restore();
+        return;
+    }
+    if (tvIn && tvZone === 'ctl') {
+        const [, c0, c1] = TV_CTL[tvCtl];
+        box([c0 * 8, 184, (c1 - c0 + 1) * 8, 8], tvVol || (st & 0x100) ? '#ffff24' : '#ffffff');
+    } else if (!tvIn && recent) box(TV_ZONES[tvZone], '#ffffff');
+    else if (tvIn && (tvZone === 'pic' || tvZone === 'seek') && recent) box(TV_ZONES[tvZone], '#6dffff');
+}
+
+// ---- a page's keys (not the player): the key rows, the long presses
+function tvPage(action, st) {
+    const pg = st & 15;
+    const arrows = { up: K.UP, down: K.DOWN, left: K.LEFT, right: K.RIGHT };
+    if (tvBar && tvBar.page !== pg) tvBar = null;
+    if (pg !== PG.MARKETS) tvHeads = false;
+    if (tvBar) {
+        const n = tvBar.items.length;
+        if (action === 'left') tvBar.i = (tvBar.i + n - 1) % n;
+        else if (action === 'right') tvBar.i = (tvBar.i + 1) % n;
+        else if (action === 'ok') {
+            const keep = tvBar, i = tvBar.i;
+            tvBar.items[i][1]();
+            // (the key row stays, its words may have changed: the same place again)
+            const s2 = X.web_tv_state();
+            if (tvBar === keep && (s2 & 15) === pg && !(s2 & 0x600)) openBar(pg, describe(), i);
+            else if ((s2 & 15) !== pg) tvBar = null;
+        }
+        else if (action === 'up' || action === 'back') tvBar = null;
+        return 'ok';
+    }
+    if (tvHeads) {
+        if (action === 'ok') { tvHeads = false; X.web_key(ch('T')); }
+        else if (action === 'down') { tvHeads = false; openBar(pg, describe()); }
+        else if (action === 'up' || action === 'back') tvHeads = false;
+        return 'ok';
+    }
+    const d = (st & 0x600) ? '' : describe();
+    if (pg === PG.MARKETS && d) {
+        const chart = /markets chart/.test(d);
+        if (!chart && action === 'longright') { X.web_key(ch('I')); return 'ok'; }
+        if (!chart && action === 'longup') { X.web_key(ch('U')); return 'ok'; }
+        if (!chart && action === 'longdown') { X.web_key(ch('O')); return 'ok'; }
+        if (!chart && action === 'longleft') { openBar(pg, d); return 'ok'; }
+        if (chart && action === 'longdown') { tvHeads = true; return 'ok'; }
+    }
+    if (pg === PG.NEWS && d && field(d, 'typing') !== 1) {
+        if (action === 'longdown') { openBar(pg, d); return 'ok'; }
+        if (action === 'longok' && /news feeds/.test(d)) {
+            if (field(d, 'side') === 0) X.web_key(ch('D'));                       // My feeds: out
+            else if (field(d, 'topic') >= 0) X.web_key(K.ENTER);                 // a topic's feed: in
+            else note(' Choose a topic first (OK), then hold OK on a feed');
+            return 'ok';
+        }
+    }
+    if (pg === PG.CLOCK && d && action === 'down' && field(d, 'input') === 0 && field(d, 'choosing') === 0) { openBar(pg, d); return 'ok'; }
+    if (action === 'longok') { tvOpen(true); return 'ok'; }
+    if (action.startsWith('long')) action = action.slice(4);
+    if (action === 'back') X.web_key(K.ESC);
+    else if (action === 'ok') X.web_key(K.ENTER);
+    else if (arrows[action]) X.web_key(arrows[action]);
+    return 'ok';
+}
+
+// does a key held mean something else here? (then it acts when let go, or held: its long one)
+function tvWantsLong(name) {
+    if (name === 'ok') return true;
+    if (netPick) return false;
+    if (!X || !tvMenu.hidden || tvBar || tvHeads) return false;
+    const st = X.web_tv_state(), pg = st & 15;
+    if (st & 0x600) return false;
+    if (pg === PG.MARKETS) return /markets table/.test(describe()) ? true : name === 'down';
+    if (pg === PG.NEWS) return name === 'down' && field(describe(), 'typing') !== 1;
+    return false;
+}
+let tvHeld = null;
+// the remote's keys as they go: phase 'down' (pressed), 'repeat' (held, again), 'up' (let go)
+function tvKey(phase, name) {
+    if (!X) return 'ok';
+    if (phase === 'down') {
+        if (tvHeld && tvHeld.timer) clearTimeout(tvHeld.timer);
+        if (tvWantsLong(name)) {
+            const h = tvHeld = { name, later: true };
+            h.timer = setTimeout(() => { h.fired = true; const r = tv('long' + name); if (r === 'exit') window.PicoAmpAndroid?.exit?.(); }, 600);
+            return 'ok';
+        }
+        tvHeld = { name };
+        return tv(name);
+    }
+    if (phase === 'repeat') return tvHeld && tvHeld.name === name && !tvHeld.later ? tv(name) : 'ok';
+    const h = tvHeld;
+    if (!h || h.name !== name) return 'ok';
+    tvHeld = null;
+    if (h.later && !h.fired) { clearTimeout(h.timer); return tv(name); }
+    return 'ok';
+}
+
+function tv(action) {
+    if (!X) return 'ok';
+    ensureCtx();
+    hideHint();
+    tvAt = performance.now();
+    if (netPick) { netPickAct(action.replace(/^long(?!ok)/, '')); return 'ok'; }
+    const n = TV_ITEMS.length;
+    if (!tvMenu.hidden) {
+        if (action === 'left') tvSel = (tvSel + n - 1) % n;
+        else if (action === 'right') tvSel = (tvSel + 1) % n;
+        else if (action === 'up') tvSel = (tvSel + n - TV_COLS) % n;
+        else if (action === 'down') tvSel = (tvSel + TV_COLS) % n;
+        else if (action === 'ok') { tvOpen(false); TV_ITEMS[tvSel][1](); return 'ok'; }
+        else if (action === 'back' || action === 'menu' || action === 'longok') tvOpen(false);
+        tvShow();
+        return 'ok';
+    }
+    if (action === 'menu') { tvOpen(true); return 'ok'; }
+    const media = { playpause: K.PLAY, play: K.PLAY, pause: K.PLAY, stop: K.STOP, next: K.NEXT, prev: K.PREV, ff: ch('.'), rew: ch(','), info: K.F1 };
+    if (media[action] !== undefined) { X.web_key(media[action]); return 'ok'; }
+    const arrows = { up: K.UP, down: K.DOWN, left: K.LEFT, right: K.RIGHT };
+    const st = X.web_tv_state();
+    // another page, the help, the search line
+    if ((st & 15) !== 0 || (st & 0x600)) return tvPage(action, st);
+    tvBar = null;
+    tvHeads = false;
+    // the equalizer (from the control row's EQ): its arrows; Back or OK closes it
+    if (st & 0x100) {
+        if (action === 'back' || action === 'ok' || action === 'longok') X.web_key(ch('G'));
+        else if (arrows[action.replace(/^long/, '')]) X.web_key(arrows[action.replace(/^long/, '')]);
+        return 'ok';
+    }
+    // OK held in the list: a station in (or, in the favourites, out of) the favourites
+    if (action === 'longok') {
+        if (tvZone === 'list' && (st & 0x2000)) X.web_key(ch((st & 0x800) ? 'D' : 'F'));
+        else tvOpen(true);
+        return 'ok';
+    }
+    if (action.startsWith('long')) action = action.slice(4);
+    // the remote's own row
+    if (tvZone === 'top') {
+        if (action === 'left') tvTop = (tvTop + TV_TOP.length - 1) % TV_TOP.length;
+        else if (action === 'right') tvTop = (tvTop + 1) % TV_TOP.length;
+        else if (action === 'down' || action === 'back') { tvZone = 'seek'; tvIn = false; }
+        else if (action === 'ok') {
+            const what = TV_TOP[tvTop];
+            if (what === 'Menu') { tvZone = 'list'; tvOpen(true); }
+            else if (what === 'Help') { tvZone = 'list'; X.web_key(K.F1); }
+            else if (what === 'Sound') setLightSound(!lightSound);
+            else if (what === 'Exit') return 'exit';
+        }
+        return 'ok';
+    }
+    // the seek bar: Left/Right wind at once (OK not needed)
+    if (tvZone === 'seek' && (action === 'left' || action === 'right')) {
+        if (st & 0x1000) X.web_key(ch(action === 'left' ? ',' : '.'));
+        else note('A station cannot be wound: no seeking here');
+        return 'ok';
+    }
+    if (!tvIn) {
+        const i = TV_ORDER.indexOf(tvZone);
+        if (action === 'up') tvZone = TV_ORDER[Math.max(0, i - 1)];
+        else if (action === 'down') tvZone = TV_ORDER[Math.min(TV_ORDER.length - 1, i + 1)];
+        else if (action === 'ok') tvIn = tvZone !== 'seek';
+        else if (action === 'back') {
+            const lv = X.web_back_level();
+            if (lv === 2) return 'exit';
+            X.web_key(lv === 1 ? K.BS : K.ESC);
+        }
+        return 'ok';
+    }
+    if (action === 'back' && !tvVol && !(tvZone === 'list' && X.web_back_level() === 1)) { tvIn = false; return 'ok'; }
+    if (tvZone === 'pic') {
+        const view = st >> 4 & 3;
+        if (action === 'right') X.web_key(ch('V'));
+        else if (action === 'left') { X.web_key(ch('V')); X.web_key(ch('V')); }
+        else if (action === 'ok') { if (view === 2) X.web_full_cover(); else X.web_key(ch('Z')); }
+        else if (action === 'up' || action === 'down') { tvIn = false; return tv(action); }
+        return 'ok';
+    }
+    if (tvZone === 'list') {
+        if (action === 'back') X.web_key(K.BS);             // (the folder up: at the top Back comes out, above)
+        else if (action === 'ok') X.web_key(K.ENTER);
+        else X.web_key(arrows[action]);
+        return 'ok';
+    }
+    // the control row
+    if (tvVol) {
+        // (a TV whose volume is its own, by HDMI-CEC: up or down there)
+        if (dev && devFixed && (action === 'left' || action === 'right') && !(st & 0x10000)) dev.volumeStep(action === 'left' ? -1 : 1);
+        else if (action === 'left') X.web_key(ch('-'));
+        else if (action === 'right') X.web_key(ch('+'));
+        else if (action === 'ok' || action === 'back' || action === 'up' || action === 'down') tvVol = false;
+        return 'ok';
+    }
+    if (action === 'left') tvCtl = (tvCtl + TV_CTL.length - 1) % TV_CTL.length;
+    else if (action === 'right') tvCtl = (tvCtl + 1) % TV_CTL.length;
+    else if (action === 'up') { tvIn = false; tvZone = 'list'; }
+    else if (action === 'ok') {
+        const [what, c0] = TV_CTL[tvCtl];
+        if (what === 'volume') tvVol = true;
+        else tvClick(c0);
+    }
+    return 'ok';
+}
+if (tvMode) {
+    // a keyboard (the tests, a TV with one): the arrows and Enter as the remote's (held: their long ones),
+    // Escape as Back
+    const remote = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok' };
+    window.addEventListener('keydown', e => {
+        const r = remote[e.key];
+        const a = { Escape: 'back', ContextMenu: 'menu' }[e.key];
+        if (r) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (tvKey(e.repeat ? 'repeat' : 'down', r) === 'exit') window.PicoAmpAndroid?.exit?.();
+            return;
+        }
+        if (!tvMenu.hidden || a) {
+            if (!a && tvMenu.hidden) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (a && tv(a) === 'exit') window.PicoAmpAndroid?.exit?.();
+        }
+    }, true);
+    window.addEventListener('keyup', e => {
+        const r = remote[e.key];
+        if (!r) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (tvKey('up', r) === 'exit') window.PicoAmpAndroid?.exit?.();
+    }, true);
+}
+
 // ---------------- the hint (sound needs a key or a click first) ----------------
 const hint = document.getElementById('hint');
+if (tvMode && hint) hint.textContent = 'Up/Down: the parts \u00b7 OK: in \u00b7 Back: out \u00b7 Up at the top: Menu, Help, Exit';
 function hideHint() { if (hint) hint.hidden = true; }
 setTimeout(hideHint, 10000);
 
@@ -1238,10 +1804,17 @@ window.picoamp = {
     },
     fs: { get: fsGet, set: fsSet, list: fsList },
     key: k => X.web_key(k),
+    tvKey,                                // the remote's keys as they go (the Android app): tvKey('down'|'repeat'|'up', 'up'|'down'|'left'|'right'|'ok')
+    systemVolume,                         // the app: the device's volume changed (0-100)
+    tv,                                   // the TV's remote (the Android app): 'up' 'down' 'left' 'right' 'ok' 'longok' 'back' 'menu' 'playpause' ...; 'exit': leave
+    get tvMenuOpen() { return !tvMenu.hidden; },
+    get tvFocus() { return { zone: tvZone, inside: tvIn, control: TV_CTL[tvCtl][0], volume: tvVol, top: TV_TOP[tvTop], bar: tvBar && tvBar.items[tvBar.i][0], heads: tvHeads }; },
+    get lightSound() { return lightSound; },
     save: () => X.web_save(),
     stopSaving() { saving = false; },     // (the tests: the settings are changed under it)
     hideHint,
     // (the tests: the colour on the screen at a pixel of the picture, 256 x 192)
+    sharp() { return X.web_cfg_sharp(-1); },   // (the tests)
     pixel(x, y) {
         const cx = Math.floor(dest.x + (x + 0.5) * dest.w / 256), cy = Math.floor(dest.y + (y + 0.5) * dest.h / 192);
         return Array.from(g2.getImageData(cx, cy, 1, 1).data.slice(0, 3));
@@ -1296,6 +1869,10 @@ async function start() {
     mem = X.memory;
     X._initialize?.();
     X.web_start();
+    // the covers sharp: hires=1/0 in the address; the TV and the app: on the first time (F5 after)
+    const hires = params.get('hires');
+    if (hires === '1' || hires === '0') X.web_cfg_sharp(+hires);
+    else if (tvMode || dev) try { if (!localStorage.getItem('picoamp-tv-sharp')) { X.web_cfg_sharp(1); localStorage.setItem('picoamp-tv-sharp', '1'); } } catch { }
     setInterval(save, 15000);
     // a hidden page gets no frames: the sleep timer and the alarm go on
     setInterval(() => { if (performance.now() - lastFrame > 900) { try { X.web_frame(); } catch (e) { console.error(e); } } }, 1000);

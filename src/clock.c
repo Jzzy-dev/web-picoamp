@@ -528,9 +528,9 @@ static void ck_describe(char *out, size_t n)
     char wx[60], sal[80];
     wxstr(wx, sizeof wx);
     salstr(sal, sizeof sal);
-    snprintf(out, n, "clock %s %02d:%02d:%02d %d-%02d-%02d (%s) place='%s' weather='%s' %s err='%s'",
+    snprintf(out, n, "clock %s %02d:%02d:%02d %d-%02d-%02d (%s) place='%s' weather='%s' %s err='%s' input=%d choosing=%d",
              cfg.clock_analog ? "analog" : "digital", t.hour, t.min, t.sec, t.year, t.month, t.day, srcstr(),
-             w.place, wx, sal, w.error);
+             w.place, wx, sal, w.error, inp != 0, choosing || searching);
 }
 
 const page_t page_clock = { ck_open, ck_frame, ck_key, ck_mouse, ck_close, ck_describe };

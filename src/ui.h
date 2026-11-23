@@ -19,6 +19,10 @@ enum { MOUSE_LEFT = 1, MOUSE_RIGHT = 2, MOUSE_WHEEL_UP = 4, MOUSE_WHEEL_DOWN = 5
 void ui_init(void);
 void ui_frame(void);                      // once a frame: read the player, draw
 void ui_key(int key);
+int  ui_back_level(void);                 // the TV's Back: 0 ESC, 1 the list's folder up, 2 at the top
+void ui_goto(const char *place);
+int  ui_tv_state(void);                  // page | view << 4 | eq 0x100 | help 0x200 | search 0x400 | favourites 0x800 | seekable 0x1000 | a station chosen 0x2000 | the cover full screen 0x4000 | a cover 0x8000 | Sonos 0x10000
+void ui_full_cover(void);                // the big cover, full screen         // the player, the list at this place ("radio:", "sonos:")
 void ui_mouse(int x, int y, int button);  // x, y in the 256 x 192 picture
 void ui_drop(const char *const *paths, int n);   // files dropped on the window
 void ui_message(const char *text, bool error);

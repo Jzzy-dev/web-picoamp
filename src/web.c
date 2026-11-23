@@ -16,6 +16,7 @@
 #include "wxsvc.h"
 #include "markets.h"
 #include "cover.h"
+#include "logo.h"
 #include "picture.h"
 
 // ---------------- sys.h ----------------
@@ -203,6 +204,21 @@ void web_frame(void)
 }
 
 EXPORT(web_key) void web_key(int k) { if (started) ui_key(k); }
+EXPORT(web_back_level) int web_back_level(void) { return started ? ui_back_level() : 2; }
+EXPORT(web_goto) void web_goto(const char *place) { if (started) ui_goto(place); }
+EXPORT(web_tv_state) int web_tv_state(void) { return started ? ui_tv_state() : 0; }
+EXPORT(web_full_cover) void web_full_cover(void) { if (started) ui_full_cover(); }
+// what the page shows (as the scripts' "page"): the TV's remote reads its parts from it
+EXPORT(web_describe) const char *web_describe(void)
+{
+    static char b[2048];
+    b[0] = 0;
+    if (!started) return b;
+    char *d = ui_describe(false);
+    u_copy(b, sizeof b, d);
+    free(d);
+    return b;
+}
 EXPORT(web_mouse) void web_mouse(int x, int y, int b) { if (started) ui_mouse(x, y, b); }
 EXPORT(web_reload) void web_reload(void) { if (started) ui_reload(); }
 EXPORT(web_save) void web_save(void) { if (started) { ui_save_state(); config_save(); } }
@@ -272,6 +288,14 @@ EXPORT(web_sharp_cover) int web_sharp_cover(int32_t *o)
     return k;
 }
 // an image the page found in the track's folder (its bytes)
+// the covers sharp (F5): set (0, 1) or only asked (-1)
+EXPORT(web_cfg_sharp) int web_cfg_sharp(int on) { if (on >= 0) cfg.cover_sharp = on != 0; return cfg.cover_sharp; }
+void audio_ext_volume(bool on);
+void audio_ext_volume_is(int v);
+int audio_own_volume(void);
+EXPORT(web_ext_volume) void web_ext_volume(int on) { audio_ext_volume(on != 0); }
+EXPORT(web_ext_volume_is) void web_ext_volume_is(int v) { audio_ext_volume_is(v); }
+EXPORT(web_own_volume) int web_own_volume(void) { return audio_own_volume(); }
 EXPORT(web_cover_bytes) void web_cover_bytes(const uint8_t *data, int len) { cover_from_bytes(data, (size_t)len); }
 // a station's logo (or len 0: it has none)
 EXPORT(web_logo) void web_logo(const uint8_t *data, int len) { ui_logo(data, (size_t)len); }
